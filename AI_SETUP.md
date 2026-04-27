@@ -35,11 +35,18 @@ AI_SEMANTIC_ENABLED=true
 AI_CHAT_ENABLED=true
 AI_MAX_COLUMN_CARDS=60
 AI_MAX_RECOMMENDED_CHARTS=8
+AI_SEMANTIC_TIMEOUT_SECONDS=6
+AI_CHAT_TIMEOUT_SECONDS=12
+AI_DEBUG_TIMEOUT_SECONDS=30
 ```
 
 If Ollama or the selected model is unavailable, the app should not crash.
 `/api/analytics/core/{dataset_id}` falls back to heuristic charts, and
 `/api/chat` falls back to the existing fuzzy prompt parser.
+
+`AI_SEMANTIC_TIMEOUT_SECONDS` intentionally keeps the dashboard loading screen
+responsive. If Qwen is still warming up or is too slow, core analytics returns
+heuristic charts first instead of blocking the page.
 
 ## Manual Checks
 

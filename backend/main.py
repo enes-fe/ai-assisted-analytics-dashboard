@@ -13,6 +13,7 @@ import os
 import time
 from collections import OrderedDict
 
+from dotenv import load_dotenv
 from database import engine, get_db, Base
 from models import DatasetMeta
 import ml_service
@@ -22,6 +23,9 @@ from services.ai.chart_builder import build_chart_from_plan, build_charts_from_s
 from services.ai.prompt_planner import generate_prompt_chart_plan
 from services.ai.schemas import SemanticDatasetPlan, model_dump_compat, model_validate_compat
 from services.ai.semantic_planner import generate_semantic_dataset_plan
+
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 
 class ClusterRequest(BaseModel):
@@ -34,6 +38,9 @@ MAX_PAGE_SIZE = int(os.getenv("MAX_PAGE_SIZE", "500"))
 CACHE_TTL_SECONDS = int(os.getenv("ANALYTICS_CACHE_TTL_SECONDS", "1800"))
 CACHE_MAX_ITEMS = int(os.getenv("ANALYTICS_CACHE_MAX_ITEMS", "20"))
 MAX_CORE_CHARTS = int(os.getenv("ANALYTICS_MAX_CORE_CHARTS", "12"))
+AI_SEMANTIC_TIMEOUT_SECONDS = float(os.getenv("AI_SEMANTIC_TIMEOUT_SECONDS", "6"))
+AI_CHAT_TIMEOUT_SECONDS = float(os.getenv("AI_CHAT_TIMEOUT_SECONDS", "12"))
+AI_DEBUG_TIMEOUT_SECONDS = float(os.getenv("AI_DEBUG_TIMEOUT_SECONDS", "30"))
 
 
 def _cors_origins() -> list[str]:
@@ -43,6 +50,13 @@ def _cors_origins() -> list[str]:
 
 def _env_enabled(name: str, default: str = "true") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def _with_timeout(coro, timeout_seconds: float, label: str):
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout_seconds)
+    except asyncio.TimeoutError as exc:
+        raise TimeoutError(f"{label} timed out after {timeout_seconds:g}s") from exc
 
 Base.metadata.create_all(bind=engine)
 
@@ -258,7 +272,11 @@ async def get_core_analytics(dataset_id: int):
         if _env_enabled("AI_SEMANTIC_ENABLED", "true"):
             try:
                 # The LLM only returns a JSON plan; Pandas below builds the data.
-                semantic_plan = await generate_semantic_dataset_plan(df)
+                semantic_plan = await _with_timeout(
+                    generate_semantic_dataset_plan(df),
+                    AI_SEMANTIC_TIMEOUT_SECONDS,
+                    "AI semantic planning",
+                )
                 semantic_payload = model_dump_compat(semantic_plan)
                 ai_charts = build_charts_from_semantic_plan(df, semantic_plan)
                 if ai_charts:
@@ -292,10 +310,18 @@ async def process_chat(dataset_id: int = Form(...), prompt: str = Form(...)):
             cached = _get_cached_analytics(dataset_id)
             semantic_plan = _semantic_plan_from_cached(cached)
             if semantic_plan is None and _env_enabled("AI_SEMANTIC_ENABLED", "true"):
-                semantic_plan = await generate_semantic_dataset_plan(df)
+                semantic_plan = await _with_timeout(
+                    generate_semantic_dataset_plan(df),
+                    min(AI_CHAT_TIMEOUT_SECONDS, AI_DEBUG_TIMEOUT_SECONDS),
+                    "AI semantic planning for chat",
+                )
 
             # The LLM selects intent only; chartData is produced by Pandas.
-            plan = await generate_prompt_chart_plan(df, prompt, semantic_plan)
+            plan = await _with_timeout(
+                generate_prompt_chart_plan(df, prompt, semantic_plan),
+                AI_CHAT_TIMEOUT_SECONDS,
+                "AI prompt chart planning",
+            )
             chart = build_chart_from_plan(df, plan)
             if chart is None:
                 raise ValueError("AI returned a chart plan that could not be built from this dataset.")
@@ -331,7 +357,11 @@ async def get_semantic_plan(dataset_id: int):
         return {"semantic_plan": {"error": "AI_SEMANTIC_ENABLED is disabled."}}
 
     try:
-        plan = await generate_semantic_dataset_plan(df)
+        plan = await _with_timeout(
+            generate_semantic_dataset_plan(df),
+            AI_DEBUG_TIMEOUT_SECONDS,
+            "AI semantic planning",
+        )
         return {"semantic_plan": model_dump_compat(plan)}
     except Exception as ai_error:
         return {"semantic_plan": {"error": str(ai_error)}}
