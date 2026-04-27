@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+pandas
+scikit-learn
+python-multipart
+sqlalchemy
+pydantic
+numpy
+python-dotenv
+scipy
+openpyxl
+pyarrow
+statsmodels
+ollama

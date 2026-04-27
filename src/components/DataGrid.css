@@ -1,0 +1,211 @@
+.datagrid-widget {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-sm);
+  height: calc(100vh - 160px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.8);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.datagrid-widget:hover {
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+[data-theme="dark"] .datagrid-widget {
+  background: rgba(30, 41, 59, 0.8);
+}
+
+.datagrid-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.datagrid-title h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.datagrid-title p {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.datagrid-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-icon {
+  background: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.page-indicator {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-input {
+  width: 48px;
+  text-align: center;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  transition: border-color 0.2s ease;
+}
+
+.page-input:focus {
+  border-color: var(--accent);
+}
+
+/* Hide number arrows */
+.page-input::-webkit-outer-spin-button,
+.page-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.page-input[type=number] {
+  -moz-appearance: textfield;
+}
+
+.datagrid-title-input {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+  width: auto;
+  min-width: 250px;
+}
+
+.datagrid-title-input:hover {
+  background: rgba(255,255,255,0.5);
+  border-color: rgba(0,0,0,0.1);
+}
+
+.datagrid-title-input:focus {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+}
+
+[data-theme="dark"] .datagrid-title-input:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.datagrid-table-container {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  position: relative;
+  background: var(--bg-app);
+}
+
+.datagrid-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 10;
+}
+
+[data-theme="dark"] .datagrid-loading {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.spinner-icon {
+  animation: spin 1s linear infinite;
+  color: var(--accent);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.datagrid-table {
+  width: 100%;
+  border-collapse: separate; /* Required for sticky borders */
+  border-spacing: 0;
+  font-size: 0.8125rem;
+}
+
+.datagrid-table th,
+.datagrid-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.datagrid-table th {
+  background: var(--bg-surface);
+  position: sticky;
+  top: 0;
+  font-weight: 600;
+  color: var(--text-secondary);
+  z-index: 1;
+  box-shadow: 0 1px 0 var(--border-color); /* fake bottom border for sticky */
+}
+
+.datagrid-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.row-num-col {
+  width: 40px;
+  color: var(--text-muted);
+  text-align: center !important;
+  user-select: none;
+  font-weight: 500;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px !important;
+}

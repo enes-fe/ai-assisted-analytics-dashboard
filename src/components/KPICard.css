@@ -1,0 +1,120 @@
+.kpi-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.kpi-card:hover {
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+  transform: translateY(-2px);
+}
+
+.kpi-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kpi-title {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin: 0;
+}
+
+.kpi-title-input {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin: 0;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.kpi-title-input:hover {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.kpi-title-input:focus {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+}
+
+[data-theme="dark"] .kpi-title-input:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.kpi-body {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.kpi-value {
+  color: var(--text-primary);
+  font-size: clamp(1.2rem, 2vw, 2rem);
+  /* CSS'e planda belirlediğimiz ideal ölçüyü verdim */
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* Minimalist Trend Tasarımı (Arka plan renkleri kaldırıldı, salt metin yapıldı) */
+.kpi-trend {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.trend-up {
+  color: #10b981;
+  /* Sadece metin yeşil */
+}
+
+.trend-down {
+  color: #ef4444;
+  /* Sadece metin kırmızı */
+}
+
+.trend-neutral {
+  color: var(--text-muted);
+}
+
+.kpi-insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.kpi-insight-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
