@@ -33,7 +33,7 @@ export default function Sidebar({ currentDatasetId, onSelect, onNewDataset }: Si
     open: false, title: '', message: '', onConfirm: () => {},
   });
   const { showToast } = useToast();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const s = t.sidebar;
   // P2: throttle — only re-fetch if 30 s have elapsed since last successful fetch
   const lastFetchRef = useRef<number>(0);
@@ -223,7 +223,7 @@ export default function Sidebar({ currentDatasetId, onSelect, onNewDataset }: Si
               <div className="ds-item-meta">
                 <span>{ds.row_count.toLocaleString()} {s.records}</span>
                 <span className="ds-dot">•</span>
-                <span>{new Date(ds.created_at).toLocaleDateString('tr-TR')}</span>
+                <span>{new Date(ds.created_at).toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US')}</span>
               </div>
             </div>
             <button
