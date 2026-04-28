@@ -1,0 +1,305 @@
+.report-export-host {
+  position: fixed;
+  top: 0;
+  left: -12000px;
+  width: 1120px;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.report-export-layout {
+  --bg-app: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-hover: #eef2f7;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --border-color: #d8dee8;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-surface: #eff6ff;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --glass-blur: none;
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.45;
+  padding: 44px;
+  width: 1120px;
+}
+
+.report-export-layout,
+.report-export-layout * {
+  box-sizing: border-box;
+}
+
+.report-export-layout .no-export {
+  display: none !important;
+}
+
+.export-card,
+.export-section {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.report-cover,
+.report-section {
+  background: #ffffff;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  padding: 28px;
+}
+
+.report-cover {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.report-kicker {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+}
+
+.report-cover h1 {
+  color: #0f172a;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.report-cover h2 {
+  color: #334155;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0;
+  margin: 10px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.report-metadata {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  min-width: 260px;
+}
+
+.report-metadata div {
+  border-left: 3px solid #2563eb;
+  padding-left: 14px;
+}
+
+.report-metadata dt {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.report-metadata dd {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.report-section-heading {
+  margin-bottom: 18px;
+}
+
+.report-section-heading span {
+  color: #2563eb;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.report-section-heading h2 {
+  color: #0f172a;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.report-kpi-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.report-kpi-card {
+  background: #f8fafc;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  min-height: 142px;
+  padding: 18px;
+}
+
+.report-kpi-title {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+}
+
+.report-kpi-value {
+  color: #0f172a;
+  font-size: 27px;
+  font-weight: 800;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.report-kpi-trend {
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 8px;
+}
+
+.report-kpi-trend--up {
+  color: #047857;
+}
+
+.report-kpi-trend--down {
+  color: #b91c1c;
+}
+
+.report-kpi-insight {
+  border-top: 1px solid #d8dee8;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+  padding-top: 10px;
+  white-space: normal;
+}
+
+.report-chart-section {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.report-chart-section .chart-widget {
+  min-height: 456px;
+}
+
+.report-chart-section--clustering .chart-widget {
+  min-height: 0;
+}
+
+.report-export-layout .analysis-table {
+  color: #334155;
+  font-size: 12px;
+}
+
+.report-export-layout .analysis-table th {
+  color: #0f172a;
+}
+
+.report-export-layout .stats-badges {
+  border-top: 1px solid #d8dee8;
+  flex-wrap: wrap;
+}
+
+.report-export-layout .stat-badge {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #334155;
+}
+
+.report-insight-list {
+  display: grid;
+  gap: 12px;
+}
+
+.report-insight-item {
+  background: #f8fafc;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+
+.report-insight-meta {
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.report-insight-item h3 {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.report-insight-item p,
+.report-empty-state {
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.report-notes-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.report-notes-list li {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+body.is-exporting-report * {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media print {
+  .no-export {
+    display: none !important;
+  }
+
+  .export-card,
+  .export-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

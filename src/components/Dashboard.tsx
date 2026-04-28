@@ -6,6 +6,7 @@ import type { ChartConfig } from './ChartWidget';
 import KPICard from './KPICard';
 import type { KPIConfig } from './KPICard';
 import DataGrid from './DataGrid';
+import ReportExportLayout from './ReportExportLayout';
 import { Download, Settings, FileText, LayoutGrid, Unlock, X, Check, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useToast } from './useToast';
 import { useLang } from '../contexts/useLang';
@@ -47,6 +48,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
   const [mlCharts, setMlCharts] = useState<ChartConfig[]>([]);
   const [forecastMessage, setForecastMessage] = useState('');
   const [isGridLayout, setIsGridLayout] = useState(false);
+  const [exportTimestamp, setExportTimestamp] = useState(() => new Date());
   // KPI config panel
   const [showKpiPanel, setShowKpiPanel] = useState(false);
   const [availableKpiCols, setAvailableKpiCols] = useState<{column: string; label: string; priority: number; is_binary: boolean}[]>([]);
@@ -69,6 +71,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
   const d = t.dashboard;
   const settingsRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
 
 
   // ─── Resize observer ───────────────────────────────────────────
@@ -330,63 +333,96 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
 
 
   const handleExportPDF = async () => {
-    const element = document.querySelector('.insights-container') as HTMLElement;
-    if (!element) return;
+    if (!data || data.length === 0) return;
+
+    const generatedAt = new Date();
+    setExportTimestamp(generatedAt);
     showToast(d.pdfPrep, 'info');
 
     try {
-      const canvas = await html2canvas(element, {
-        scale: 1.5,
-        useCORS: true,
-        logging: false,
-        backgroundColor: getComputedStyle(document.documentElement)
-          .getPropertyValue('--bg-app')
-          .trim(),
-        scrollX: -window.scrollX,
-        scrollY: -window.scrollY,
-        windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight,
+      await new Promise<void>(resolve => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => window.setTimeout(resolve, 120));
+        });
       });
+
+      const reportRoot = reportRef.current;
+      const sections = reportRoot
+        ? Array.from(reportRoot.querySelectorAll<HTMLElement>('[data-export-section="true"]'))
+        : [];
+
+      if (!reportRoot || sections.length === 0) {
+        throw new Error('Report export layout is not ready.');
+      }
 
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
-      const margin = 10;
-      const usableWidth = pdfWidth - margin * 2;
-      const usableHeight = pdfHeight - margin * 2;
+      const margin = 12;
+      const footerSpace = 8;
+      const contentWidth = pdfWidth - margin * 2;
+      const contentBottom = pdfHeight - margin - footerSpace;
+      const usableHeight = contentBottom - margin;
+      let y = margin;
 
-      const imgWidthPx = canvas.width;
-      const imgHeightPx = canvas.height;
+      const paintPageBackground = () => {
+        pdf.setFillColor(248, 250, 252);
+        pdf.rect(0, 0, pdfWidth, pdfHeight, 'F');
+      };
 
-      const scaledW = usableWidth;
-      const scaledH = (imgHeightPx / imgWidthPx) * scaledW;
+      paintPageBackground();
+      document.body.classList.add('is-exporting-report');
 
-      let yOffset = 0;
-      let pageCount = 0;
+      for (const section of sections) {
+        const canvas = await html2canvas(section, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#f8fafc',
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: reportRoot.scrollWidth,
+          windowHeight: reportRoot.scrollHeight,
+          ignoreElements: element => element.classList?.contains('no-export') || false,
+        });
 
-      while (yOffset < scaledH) {
-        if (pageCount > 0) pdf.addPage();
-        const srcY = (yOffset / scaledH) * imgHeightPx;
-        const pageImgH = Math.min(usableHeight, scaledH - yOffset);
-        const srcH = (pageImgH / scaledH) * imgHeightPx;
+        const imageData = canvas.toDataURL('image/png');
+        let imageWidth = contentWidth;
+        let imageHeight = (canvas.height / canvas.width) * imageWidth;
 
-        const pageCanvas = document.createElement('canvas');
-        pageCanvas.width = imgWidthPx;
-        pageCanvas.height = srcH;
-        const ctx = pageCanvas.getContext('2d')!;
-        ctx.drawImage(canvas, 0, srcY, imgWidthPx, srcH, 0, 0, imgWidthPx, srcH);
-        const pageData = pageCanvas.toDataURL('image/jpeg', 0.92);
+        if (imageHeight > usableHeight) {
+          const fitRatio = usableHeight / imageHeight;
+          imageWidth *= fitRatio;
+          imageHeight = usableHeight;
+        }
 
-        pdf.addImage(pageData, 'JPEG', margin, margin, scaledW, pageImgH);
-        yOffset += usableHeight;
-        pageCount++;
+        if (y > margin && y + imageHeight > contentBottom) {
+          pdf.addPage();
+          paintPageBackground();
+          y = margin;
+        }
+
+        const x = margin + (contentWidth - imageWidth) / 2;
+        pdf.addImage(imageData, 'PNG', x, y, imageWidth, imageHeight);
+        y += imageHeight + 5;
       }
 
-      pdf.save(`report_${filename || 'dataset'}.pdf`);
+      const pageCount = pdf.getNumberOfPages();
+      for (let page = 1; page <= pageCount; page++) {
+        pdf.setPage(page);
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text(`${filename || 'Dataset'} - ${page}/${pageCount}`, margin, pdfHeight - 6);
+      }
+
+      const safeFilename = (filename || 'dataset').replace(/[\\/:*?"<>|]+/g, '_');
+      pdf.save(`report_${safeFilename}.pdf`);
       showToast(d.pdfSuccess, 'success');
     } catch (e) {
       console.error(e);
       showToast(d.pdfFail, 'error');
+    } finally {
+      document.body.classList.remove('is-exporting-report');
     }
   };
 
@@ -444,14 +480,14 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
           <p className="page-subtitle">{rowCount.toLocaleString('tr-TR')} {d.subtitle}</p>
         </div>
 
-        <div className="dashboard-center-group">
+        <div className="dashboard-center-group no-export">
           <div className="dashboard-tabs">
             <button className={`tab-btn ${activeTab === 'insights' ? 'active' : ''}`} onClick={() => setActiveTab('insights')}>{d.tabs.insights}</button>
             <button className={`tab-btn ${activeTab === 'data' ? 'active' : ''}`} onClick={() => setActiveTab('data')}>{d.tabs.data}</button>
           </div>
         </div>
 
-          <div className="dashboard-actions">
+          <div className="dashboard-actions no-export">
           <div className="settings-wrapper" ref={settingsRef}>
             <button className={`btn-secondary icon-btn-only ${showSettings ? 'active' : ''}`} onClick={() => setShowSettings(!showSettings)} title="Ayarlar">
               <Settings size={18} />
@@ -498,7 +534,9 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
         <DataGrid datasetId={datasetId!} columns={columns} />
       ) : (
         <div className="insights-container">
-          <AIPrompt onGenerate={handleAIGenerate} />
+          <div className="no-export">
+            <AIPrompt onGenerate={handleAIGenerate} />
+          </div>
 
           {isReArchitecting ? (
             <div className="analysis-loader-container" style={{ height: '40vh' }}>
@@ -621,6 +659,24 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
               )}
             </>
           )}
+        </div>
+      )}
+
+      {data && analysisPhase === 'complete' && (
+        <div className="report-export-host" ref={reportRef} aria-hidden="true">
+          <ReportExportLayout
+            datasetName={filename || 'Dataset'}
+            generatedAt={exportTimestamp}
+            rowCount={rowCount}
+            data={data}
+            kpis={kpiData}
+            charts={charts}
+            mlCharts={mlCharts}
+            numberFormat={numberFormat}
+            aiStatus={aiStatus}
+            aiMessage={aiMessage}
+            forecastMessage={forecastMessage}
+          />
         </div>
       )}
     </div>

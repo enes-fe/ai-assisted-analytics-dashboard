@@ -65,6 +65,7 @@ interface ChartWidgetProps {
   data: any[];
   numberFormat?: 'compact' | 'full';
   onRemove?: () => void;
+  exportMode?: boolean;
 }
 
 const COLORS = [
@@ -78,7 +79,7 @@ const VIBRANT_GRADIENT = [
   '#ef4444', '#f87171', '#64748b', '#94a3b8'
 ];
 
-export default function ChartWidget({ config, data, numberFormat = 'compact', onRemove }: ChartWidgetProps) {
+export default function ChartWidget({ config, data, numberFormat = 'compact', onRemove, exportMode = false }: ChartWidgetProps) {
   const chartDataToUse = config.chartData || data;
   const storageKey = `chart_title_${config.id}`;
   const typeKey = `chart_type_${config.id}`;
@@ -370,7 +371,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                 <XAxis type="number" dataKey={scatterXKey} name={scatterXKey} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} domain={['auto', 'auto']} />
                 <YAxis type="number" dataKey={scatterYKey} name={scatterYKey} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} domain={['auto', 'auto']} />
                 <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} content={renderPointTooltip} />
-                <Scatter name={config.title} data={chartDataToUse} fill="var(--accent)" shape={renderScatterShape} onClick={(point: any) => setLockedPoint(point?.payload || point)} isAnimationActive={false} />
+                <Scatter name={config.title} data={chartDataToUse} fill="var(--accent)" shape={renderScatterShape} onClick={exportMode ? undefined : (point: any) => setLockedPoint(point?.payload || point)} isAnimationActive={false} />
                 {regressionData && (
                   <Line data={regressionData} type="monotone" dataKey="regression" stroke="#ef4444" strokeWidth={2} dot={false} activeDot={false} legendType="none" isAnimationActive={false} />
                 )}
@@ -493,7 +494,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                   label={{ value: config.yAxisLabel || config.scatter_col_y, angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 11 }}
                 />
                 <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} content={renderPointTooltip} />
-                <Scatter name={c.clusters} data={chartDataToUse} shape={renderScatterShape} onClick={(point: any) => setLockedPoint(point?.payload || point)}>
+                <Scatter name={c.clusters} data={chartDataToUse} shape={renderScatterShape} onClick={exportMode ? undefined : (point: any) => setLockedPoint(point?.payload || point)} isAnimationActive={false}>
                   {chartDataToUse.map((entry: any, index: number) => (
                     <Cell key={`cell-${index}`} fill={COLORS[parseInt(entry.cluster) % COLORS.length]} />
                   ))}
@@ -567,11 +568,15 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
   };
 
   return (
-    <div className="chart-widget">
+    <div className={`chart-widget ${exportMode ? 'chart-widget--export export-card' : ''}`}>
       <div className="chart-header">
-        <input className="chart-title-input" value={editableTitle} onChange={(e) => handleTitleChange(e.target.value)} title={c.clickToEdit || c.editTitle || 'Click to edit'} />
+        {exportMode ? (
+          <h3 className="chart-title-static">{editableTitle}</h3>
+        ) : (
+          <input className="chart-title-input" value={editableTitle} onChange={(e) => handleTitleChange(e.target.value)} title={c.clickToEdit || c.editTitle || 'Click to edit'} />
+        )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        {!exportMode && <div className="chart-header-actions no-export">
           {onRemove && (
             <button className="icon-btn-ghost chart-remove-btn" onClick={onRemove} title={c.remove}>
               <X size={14} />
@@ -599,7 +604,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
 
             )}
           </div>
-        </div>
+        </div>}
       </div>
 
       <div className="chart-body">
@@ -627,16 +632,23 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
         <div className="chart-footer">
           <div className="insight-top">
             <Info size={16} className="insight-icon" />
-            <label className="insight-editor">
-              <span>{c.insight}</span>
-              <textarea
-                className="insight-text insight-text-input"
-                value={editableInsight}
-                onChange={(e) => handleInsightChange(e.target.value)}
-                title={c.editInsight || c.editTitle}
-                rows={2}
-              />
-            </label>
+            {exportMode ? (
+              <div className="insight-editor">
+                <span>{c.insight}</span>
+                <p className="insight-text insight-text-static">{editableInsight}</p>
+              </div>
+            ) : (
+              <label className="insight-editor">
+                <span>{c.insight}</span>
+                <textarea
+                  className="insight-text insight-text-input"
+                  value={editableInsight}
+                  onChange={(e) => handleInsightChange(e.target.value)}
+                  title={c.editInsight || c.editTitle}
+                  rows={2}
+                />
+              </label>
+            )}
           </div>
           {(config.normalityNote || config.rSquared || config.cramersV || config.effect_size !== undefined || config.quality) && (
             <div className="stats-badges">

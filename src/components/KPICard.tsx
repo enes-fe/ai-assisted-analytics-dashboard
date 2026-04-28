@@ -86,7 +86,7 @@ export default function KPICard({ config, numberFormat = 'compact', onConfigure 
           title={t.kpi.editTitle}
         />
 
-        <div className="card-actions-wrapper" ref={menuRef}>
+        <div className="card-actions-wrapper no-export" ref={menuRef}>
           <button className="icon-btn-ghost" onClick={() => setShowMenu(!showMenu)}>
             <MoreHorizontal size={16} />
           </button>

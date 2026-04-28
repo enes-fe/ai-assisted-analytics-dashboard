@@ -28,9 +28,10 @@ def test_forecasting():
 
 def test_heuristic_charts():
     print("Testing generate_heuristic_charts...")
+    rng = np.random.default_rng(42)
     df = pd.DataFrame({
-        'A': np.random.rand(100),
-        'B': np.random.rand(100),
+        'A': rng.exponential(scale=1.0, size=100),
+        'B': rng.gamma(shape=2.0, scale=1.0, size=100),
         'Cat': ['X', 'Y'] * 50
     })
     
