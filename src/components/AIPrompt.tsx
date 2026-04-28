@@ -8,10 +8,9 @@ const MAX_HISTORY = 8;
 
 interface AIPromptProps {
   onGenerate: (prompt: string) => void;
-  columns?: string[];
 }
 
-export default function AIPrompt({ onGenerate, columns = [] }: AIPromptProps) {
+export default function AIPrompt({ onGenerate }: AIPromptProps) {
   const [prompt, setPrompt] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<string[]>(
@@ -52,48 +51,6 @@ export default function AIPrompt({ onGenerate, columns = [] }: AIPromptProps) {
     setHistory([]);
     localStorage.removeItem(HISTORY_KEY);
     setShowHistory(false);
-  };
-
-  const getSuggestions = () => {
-    if (columns.length === 0) {
-      return [
-        { label: 'Bar Chart', prompt: 'show top values as bar chart' },
-        { label: 'Trends', prompt: 'show trend over time' },
-        { label: 'Summary', prompt: 'summary of key metrics' },
-      ];
-    }
-
-    const numericCols = columns.filter(c => {
-      const lower = c.toLowerCase();
-      return lower.includes('sales') || lower.includes('price') || lower.includes('amount') || lower.includes('count') || lower.includes('value');
-    });
-
-    const categoryCols = columns.filter(c => {
-      const lower = c.toLowerCase();
-      return lower.includes('category') || lower.includes('region') || lower.includes('type') || lower.includes('status') || lower.includes('name');
-    });
-
-    const firstNum = numericCols[0] || columns[0];
-    const firstCat = categoryCols[0] || columns[1] || columns[0];
-
-    const suggestions = [
-      { label: p.suggestionDistribution(firstCat), prompt: p.suggestionDistributionPrompt(firstCat) },
-      { label: p.suggestionAnalysis(firstNum), prompt: p.suggestionAnalysisPrompt(firstNum) },
-    ];
-
-    if (numericCols.length >= 2) {
-      suggestions.push({
-        label: p.suggestionCorrelation,
-        prompt: p.suggestionCorrelationPrompt(numericCols[0], numericCols[1]),
-      });
-    } else {
-      suggestions.push({
-        label: p.suggestionForecast,
-        prompt: p.suggestionForecastPrompt(firstNum),
-      });
-    }
-
-    return suggestions;
   };
 
   return (
@@ -158,19 +115,6 @@ export default function AIPrompt({ onGenerate, columns = [] }: AIPromptProps) {
           <Send size={18} />
         </button>
       </form>
-      <div className="prompt-suggestions">
-        <span className="suggestion-label">{p.suggestions}</span>
-        {getSuggestions().map((s, idx) => (
-          <button
-            key={idx}
-            type="button"
-            onClick={() => setPrompt(s.prompt)}
-            className="suggestion-chip"
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

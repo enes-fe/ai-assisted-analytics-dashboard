@@ -64,36 +64,6 @@
   cursor: not-allowed;
 }
 
-.prompt-suggestions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-
-.suggestion-label {
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.suggestion-chip {
-  font-size: 13px;
-  color: var(--text-secondary);
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-color);
-  padding: 4px 12px;
-  border-radius: 16px;
-  transition: all 0.2s ease;
-}
-
-.suggestion-chip:hover {
-  background-color: var(--bg-hover);
-  color: var(--text-primary);
-  border-color: var(--text-muted);
-}
-
 /* ── History button & dropdown ─────────────────────────────── */
 .prompt-history-wrapper {
   position: relative;

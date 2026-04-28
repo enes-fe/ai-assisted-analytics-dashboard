@@ -192,6 +192,36 @@
   box-shadow: 0 1px 0 var(--border-color); /* fake bottom border for sticky */
 }
 
+.datagrid-sort-btn {
+  width: 100%;
+  min-width: 120px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.datagrid-sort-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.datagrid-sort-btn svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.datagrid-sort-btn.active {
+  color: var(--accent);
+}
+
 .datagrid-table tbody tr:hover {
   background: var(--bg-hover);
 }
