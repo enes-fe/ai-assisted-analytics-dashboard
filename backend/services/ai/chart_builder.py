@@ -11,7 +11,7 @@ from .schemas import ChartPlan, SemanticDatasetPlan
 
 
 AGG_FUNCS = {"sum", "mean", "count", "min", "max"}
-CHART_TYPES = {"bar", "line", "pie", "scatter", "area", "table"}
+CHART_TYPES = {"bar", "line", "pie", "donut", "scatter", "area", "table"}
 
 
 def _valid_col(df: pd.DataFrame, col: Optional[str]) -> bool:
@@ -36,10 +36,10 @@ def _is_id_dimension(df: pd.DataFrame, col: Optional[str]) -> bool:
     return is_id_column(str(col), df[col])
 
 
-def _sort_and_limit(data: pd.DataFrame, value_col: str, sort: str, limit: int) -> pd.DataFrame:
+def _sort_and_limit(data: pd.DataFrame, value_col: str, sort: str, limit: int, max_limit: int = 5) -> pd.DataFrame:
     if sort in {"asc", "desc"} and value_col in data.columns:
         data = data.sort_values(value_col, ascending=(sort == "asc"))
-    return data.head(max(1, min(int(limit or 5), 5)))
+    return data.head(max(1, min(int(limit or max_limit), max_limit)))
 
 
 def _chart_id(plan: ChartPlan) -> str:
@@ -164,7 +164,13 @@ def build_chart_from_plan(df: pd.DataFrame, plan: ChartPlan) -> Optional[dict]:
             if plan.limit:
                 grouped = grouped.head(max(1, min(plan.limit, 30)))
         else:
-            grouped = _sort_and_limit(grouped, value_col, plan.sort, plan.limit)
+            grouped = _sort_and_limit(
+                grouped,
+                value_col,
+                plan.sort,
+                plan.limit,
+                max_limit=8 if chart_type in {"pie", "donut"} else 5,
+            )
 
         chart_data = _records(grouped)
         # Derive title from actual columns, not the LLM plan (avoids title/data mismatch bugs)

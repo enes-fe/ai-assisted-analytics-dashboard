@@ -5,7 +5,7 @@ export const translations = {
     dashboard: {
       tabs: { insights: 'Analizler', data: 'Veri Gezgini' },
       settings: { numberFormat: 'Sayı Formatı', compact: 'Kısa Format (1.2K)', full: 'Tam Format (1,200)' },
-      actions: { exportPdf: 'PDF Rapor', exportCsv: 'Dışa Aktar', dynamicLayout: 'Dinamik Düzen', editMode: 'Düzenleme Modu' },
+      actions: { export: 'Dışa Aktar', exportPdf: 'PDF olarak dışa aktar', exportCsv: 'CSV olarak dışa aktar', dynamicLayout: 'Dinamik Düzen', editMode: 'Düzenleme Modu' },
       loading: {
         uploading: 'Veri Hattına Aktarılıyor...',
         reading: 'Veri Mimarisi Kavranıyor...',
@@ -144,7 +144,7 @@ export const translations = {
     dashboard: {
       tabs: { insights: 'Analytics', data: 'Data Explorer' },
       settings: { numberFormat: 'Number Format', compact: 'Compact (1.2K)', full: 'Full (1,200)' },
-      actions: { exportPdf: 'PDF Report', exportCsv: 'Export', dynamicLayout: 'Dynamic Layout', editMode: 'Edit Mode' },
+      actions: { export: 'Export', exportPdf: 'Export as PDF', exportCsv: 'Export as CSV', dynamicLayout: 'Dynamic Layout', editMode: 'Edit Mode' },
       loading: {
         uploading: 'Uploading to Pipeline...',
         reading: 'Understanding Data Structure...',

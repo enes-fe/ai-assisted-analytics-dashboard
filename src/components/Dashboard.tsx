@@ -6,7 +6,7 @@ import type { ChartConfig } from './ChartWidget';
 import KPICard from './KPICard';
 import type { KPIConfig } from './KPICard';
 import DataGrid from './DataGrid';
-import { Download, Settings, FileText, LayoutGrid, Unlock, X, Check, AlertTriangle } from 'lucide-react';
+import { Download, Settings, FileText, LayoutGrid, Unlock, X, Check, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useToast } from './useToast';
 import { useLang } from '../contexts/useLang';
 import html2canvas from 'html2canvas';
@@ -43,6 +43,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
   const [activeTab, setActiveTab] = useState<'insights' | 'data'>('insights');
   const [numberFormat, setNumberFormat] = useState<'compact' | 'full'>('compact');
   const [showSettings, setShowSettings] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [mlCharts, setMlCharts] = useState<ChartConfig[]>([]);
   const [forecastMessage, setForecastMessage] = useState('');
   const [isGridLayout, setIsGridLayout] = useState(false);
@@ -67,6 +68,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
   const { t } = useLang();
   const d = t.dashboard;
   const settingsRef = useRef<HTMLDivElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
 
 
   // ─── Resize observer ───────────────────────────────────────────
@@ -92,6 +94,9 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
     const handleClickOutside = (event: MouseEvent) => {
       if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
         setShowSettings(false);
+      }
+      if (exportRef.current && !exportRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -465,12 +470,25 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
             <span>{isGridLayout ? d.actions.editMode : d.actions.dynamicLayout}</span>
           </button>
 
-          <button className="btn-secondary" onClick={handleExportPDF} title={d.actions.exportPdf}>
-            <FileText size={16} /> {d.actions.exportPdf}
-          </button>
-          <button className="btn-primary" onClick={handleExportCSV} title={d.actions.exportCsv}>
-            <Download size={16} /> {d.actions.exportCsv}
-          </button>
+          <div className="export-wrapper" ref={exportRef}>
+            <button className="btn-primary" onClick={() => setShowExportMenu(!showExportMenu)} title={d.actions.export}>
+              <Download size={16} />
+              <span>{d.actions.export}</span>
+              <ChevronDown size={14} />
+            </button>
+            {showExportMenu && (
+              <div className="card-dropdown export-dropdown">
+                <button className="dropdown-item dropdown-item-icon" onClick={() => { setShowExportMenu(false); handleExportPDF(); }}>
+                  <FileText size={14} />
+                  {d.actions.exportPdf}
+                </button>
+                <button className="dropdown-item dropdown-item-icon" onClick={() => { setShowExportMenu(false); handleExportCSV(); }}>
+                  <Download size={14} />
+                  {d.actions.exportCsv}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

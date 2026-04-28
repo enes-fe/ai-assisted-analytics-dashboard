@@ -19,7 +19,7 @@ const Hexagon = (props: any) => {
 
 export interface ChartConfig {
   id: string;
-  type: 'bar' | 'line' | 'pie' | 'area' | 'scatter' | 'table' | 'forecast' | 'clustering' | 'boxplot';
+  type: 'bar' | 'line' | 'pie' | 'donut' | 'area' | 'scatter' | 'table' | 'forecast' | 'clustering' | 'boxplot';
   title: string;
   xAxisKey: string;
   series: { key: string; color?: string; name?: string }[];
@@ -98,6 +98,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
     const savedInsight = localStorage.getItem(insightStorageKey);
     return savedInsight !== null ? savedInsight : config.insight || '';
   });
+  const [lockedPoint, setLockedPoint] = useState<any | null>(null);
   const [localFormat, setLocalFormat] = useState<'compact' | 'full' | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -122,6 +123,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
   };
 
   useEffect(() => { setLocalFormat(null); }, [numberFormat]);
+  useEffect(() => { setLockedPoint(null); }, [config.id, activeType]);
 
 
 
@@ -184,6 +186,73 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
         {extraKeys.map(key => (
           <div key={key}>{key}: <b>{tooltipFormatter(row[key])}</b></div>
         ))}
+      </div>
+    );
+  };
+
+  const getNearbyPoints = (row: any, xKey?: string, yKey?: string) => {
+    if (!row || !xKey || !yKey) return row ? [row] : [];
+    const rows = Array.isArray(chartDataToUse) ? chartDataToUse : [];
+    const x = Number(row[xKey]);
+    const y = Number(row[yKey]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return [row];
+
+    const numericRows = rows.filter((item: any) => Number.isFinite(Number(item?.[xKey])) && Number.isFinite(Number(item?.[yKey])));
+    const xVals = numericRows.map((item: any) => Number(item[xKey]));
+    const yVals = numericRows.map((item: any) => Number(item[yKey]));
+    const xRange = Math.max(...xVals) - Math.min(...xVals) || 1;
+    const yRange = Math.max(...yVals) - Math.min(...yVals) || 1;
+
+    return numericRows
+      .map((item: any) => {
+        const dx = Math.abs(Number(item[xKey]) - x) / xRange;
+        const dy = Math.abs(Number(item[yKey]) - y) / yRange;
+        return { item, distance: Math.sqrt(dx * dx + dy * dy), sameX: dx < 0.002 };
+      })
+      .filter(({ distance, sameX }) => distance <= 0.045 || (sameX && distance <= 0.12))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 10)
+      .map(({ item }) => item);
+  };
+
+  const renderScatterShape = (props: any) => {
+    const { cx, cy, fill } = props;
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+    return (
+      <g className="scatter-point-hit">
+        <circle className="scatter-hit-area" cx={cx} cy={cy} r={14} />
+        {config.isHexbin ? <Hexagon cx={cx} cy={cy} fill={fill} /> : <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.72} />}
+      </g>
+    );
+  };
+
+  const renderLockedPointPanel = (xKey?: string, yKey?: string) => {
+    if (!lockedPoint || !xKey || !yKey) return null;
+    const nearby = getNearbyPoints(lockedPoint, xKey, yKey);
+    const keys = Array.from(new Set([xKey, yKey, ...(config.metricKeys || [])])).filter(Boolean) as string[];
+    return (
+      <div className="scatter-detail-panel">
+        <div className="scatter-detail-header">
+          <div>
+            <div className="scatter-detail-title">{rowLabel(lockedPoint) || 'Selected point'}</div>
+            <div className="scatter-detail-subtitle">{nearby.length > 1 ? `${nearby.length} nearby points` : '1 point'}</div>
+          </div>
+          <button className="icon-btn-ghost" onClick={() => setLockedPoint(null)} title="Close">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="scatter-nearby-list">
+          {nearby.map((item: any, index: number) => (
+            <div key={`${rowLabel(item) || item.__row || index}-${index}`} className="scatter-nearby-row">
+              <div className="scatter-nearby-name">{rowLabel(item) || `${c.row || 'Row'} ${item.__row || index + 1}`}</div>
+              <div className="scatter-nearby-values">
+                {keys.slice(0, 5).map(key => (
+                  item[key] !== undefined ? <span key={key}>{key}: <b>{tooltipFormatter(item[key])}</b></span> : null
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   };
@@ -264,14 +333,15 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
             </AreaChart>
           </ResponsiveContainer>
         );
-      case 'pie': {
+      case 'pie':
+      case 'donut': {
         const pieDataKey = config.series[0]?.key;
         return (
           <ResponsiveContainer width="100%" height={300} debounce={50}>
             <PieChart>
               <RechartsTooltip formatter={tooltipFormatter} contentStyle={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)', color: 'var(--text-primary)', borderRadius: '8px', boxShadow: 'var(--shadow-md)' }} />
               <Legend wrapperStyle={{ fontSize: '12px' }} />
-              <Pie data={chartDataToUse} dataKey={pieDataKey} nameKey={config.xAxisKey} cx="50%" cy="50%" outerRadius={100} fill="#8884d8" label isAnimationActive={false}>
+              <Pie data={chartDataToUse} dataKey={pieDataKey} nameKey={config.xAxisKey} cx="50%" cy="50%" innerRadius={activeType === 'donut' ? 48 : 0} outerRadius={100} fill="#8884d8" label isAnimationActive={false}>
                 {chartDataToUse.map((_: any, index: number) => (
                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                 ))}
@@ -293,18 +363,21 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
           }
         }
         return (
-          <ResponsiveContainer width="100%" height={300} debounce={50}>
-            <ComposedChart margin={{ top: 20, right: 20, bottom: 20, left: -20 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
-              <XAxis type="number" dataKey={scatterXKey} name={scatterXKey} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} domain={['auto', 'auto']} />
-              <YAxis type="number" dataKey={scatterYKey} name={scatterYKey} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} domain={['auto', 'auto']} />
-              <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} content={renderPointTooltip} />
-              <Scatter name={config.title} data={chartDataToUse} fill="var(--accent)" shape={config.isHexbin ? <Hexagon /> : 'circle'} isAnimationActive={false} />
-              {regressionData && (
-                <Line data={regressionData} type="monotone" dataKey="regression" stroke="#ef4444" strokeWidth={2} dot={false} activeDot={false} legendType="none" isAnimationActive={false} />
-              )}
-            </ComposedChart>
-          </ResponsiveContainer>
+          <>
+            <ResponsiveContainer width="100%" height={300} debounce={50}>
+              <ComposedChart margin={{ top: 20, right: 20, bottom: 20, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
+                <XAxis type="number" dataKey={scatterXKey} name={scatterXKey} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} domain={['auto', 'auto']} />
+                <YAxis type="number" dataKey={scatterYKey} name={scatterYKey} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} domain={['auto', 'auto']} />
+                <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} content={renderPointTooltip} />
+                <Scatter name={config.title} data={chartDataToUse} fill="var(--accent)" shape={renderScatterShape} onClick={(point: any) => setLockedPoint(point?.payload || point)} isAnimationActive={false} />
+                {regressionData && (
+                  <Line data={regressionData} type="monotone" dataKey="regression" stroke="#ef4444" strokeWidth={2} dot={false} activeDot={false} legendType="none" isAnimationActive={false} />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+            {renderLockedPointPanel(scatterXKey, scatterYKey)}
+          </>
         );
       }
       case 'forecast': {
@@ -420,13 +493,14 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                   label={{ value: config.yAxisLabel || config.scatter_col_y, angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 11 }}
                 />
                 <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} content={renderPointTooltip} />
-                <Scatter name={c.clusters} data={chartDataToUse}>
+                <Scatter name={c.clusters} data={chartDataToUse} shape={renderScatterShape} onClick={(point: any) => setLockedPoint(point?.payload || point)}>
                   {chartDataToUse.map((entry: any, index: number) => (
                     <Cell key={`cell-${index}`} fill={COLORS[parseInt(entry.cluster) % COLORS.length]} />
                   ))}
                 </Scatter>
               </ScatterChart>
             </ResponsiveContainer>
+            {renderLockedPointPanel(config.scatter_col_x, config.scatter_col_y)}
             <div className="cluster-meta-strip">
               <span>{aggregationLabel}</span>
               <span className={`silhouette-quality ${String(config.silhouette_quality || '').toLowerCase()}`}>{silhouetteText}</span>

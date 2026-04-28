@@ -87,6 +87,15 @@ def build_charts_from_fast_plan(
                     return charts
 
     # ── b. Scatter: primary_metrics[0] vs primary_metrics[1] ─────────────────
+    for dim in dimensions:
+        if primary_metrics:
+            chart = _pie_chart(df, primary_metrics[0], dim, fast_plan.detected_domain)
+            if chart:
+                charts.append(chart)
+                if len(charts) >= max_charts:
+                    return charts
+                break
+
     if len(primary_metrics) >= 2:
         chart = _scatter_chart(df, primary_metrics[0], primary_metrics[1], entity)
         if chart:
@@ -143,6 +152,43 @@ def _bar_chart(df: pd.DataFrame, metric: str, dimension: str, domain: str) -> Op
             "series": [{"key": metric}],
             "chartData": _records(grouped),
             "insight": f"{metric} metriği {dimension} kırılımında {agg_label.lower()} olarak gösterilmektedir.",
+            "source": "groq_fast_semantic_plan",
+        }
+    except Exception:
+        return None
+
+
+def _pie_chart(df: pd.DataFrame, metric: str, dimension: str, domain: str) -> Optional[dict]:
+    try:
+        if not _is_numeric(df, metric) or not _valid_col(df, dimension):
+            return None
+        if pd.api.types.is_numeric_dtype(df[dimension]):
+            return None
+        category_count = int(df[dimension].dropna().nunique())
+        if category_count < 2 or category_count > 8:
+            return None
+
+        agg = _infer_agg(metric)
+        grouped = (
+            df[[dimension, metric]]
+            .dropna()
+            .groupby(dimension, dropna=False)[metric]
+            .agg(agg)
+            .reset_index()
+            .sort_values(metric, ascending=False)
+            .head(8)
+        )
+        if grouped.empty:
+            return None
+        agg_label = "Toplam" if agg == "sum" else "Ortalama"
+        return {
+            "id": _chart_id(),
+            "type": "pie",
+            "title": f"{agg_label} {metric} Dağılımı — {dimension}",
+            "xAxisKey": dimension,
+            "series": [{"key": metric}],
+            "chartData": _records(grouped),
+            "insight": f"{metric} metriği {dimension} kategorilerinde pay olarak gösterilmektedir.",
             "source": "groq_fast_semantic_plan",
         }
     except Exception:

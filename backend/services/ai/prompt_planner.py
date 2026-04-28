@@ -29,7 +29,7 @@ Prefer columns classified as primary_metric, primary_entity, dimension, and time
 If the user says expected goals/xG, prefer the exact expected-goals/xG column over columns that merely contain goal.
 If the user says gol/asist/goals/assists, prefer goal and assist columns plus player/team columns when available.
 The LLM must NOT calculate metrics or chart data; it only selects columns, chart type, aggregation, sort, and limit.
-For bar, line, area, and pie charts, set dimension to an exact column name.
+For bar, line, area, pie, and donut charts, set dimension to an exact column name.
 For sum, mean, min, and max aggregations, set metric to an exact numeric column name.
 For count aggregation, set dimension to an exact column name and metric may be null.
 For scatter charts, set metric and second_metric to exact numeric column names; dimension may be a label column.
@@ -52,7 +52,7 @@ def _plan_issues(plan: ChartPlan, df: pd.DataFrame) -> list[str]:
     if plan.second_metric and plan.second_metric not in columns:
         issues.append(f"second_metric is not an existing column: {plan.second_metric}")
 
-    if plan.chart_type in {"bar", "line", "area", "pie"} and not plan.dimension:
+    if plan.chart_type in {"bar", "line", "area", "pie", "donut"} and not plan.dimension:
         issues.append("dimension is required for grouped charts")
     if plan.chart_type == "scatter":
         if not plan.metric or not plan.second_metric:
@@ -82,6 +82,140 @@ def _same_plan_shape(left: ChartPlan, right: ChartPlan) -> bool:
         and left.dimension == right.dimension
         and left.aggregation == right.aggregation
     )
+
+
+PROMPT_CHART_TYPE_ALIASES = {
+    "pie": ["pie", "pie chart", "pasta", "pasta grafik"],
+    "donut": ["donut", "doughnut", "halka", "halka grafik"],
+    "bar": ["bar", "bar chart", "column chart", "cubuk", "çubuk", "sutun", "sütun"],
+    "line": ["line", "line chart", "trend", "cizgi", "çizgi"],
+    "scatter": ["scatter", "scatter plot", "relationship", "correlation", "dagilim", "dağılım", "iliski", "ilişki"],
+    "area": ["area", "area chart", "alan"],
+    "heatmap": ["heatmap", "heat map", "isi haritasi", "ısı haritası"],
+    "treemap": ["treemap", "tree map", "agac haritasi", "ağaç haritası"],
+}
+
+SUPPORTED_OVERRIDE_TYPES = {"pie", "donut", "bar", "line", "scatter", "area"}
+
+
+def extract_prompt_chart_type(prompt: str) -> str | None:
+    for chart_type, aliases in PROMPT_CHART_TYPE_ALIASES.items():
+        if _prompt_has(prompt, aliases):
+            return chart_type
+    return None
+
+
+def _replace_plan(plan: ChartPlan, **updates: object) -> ChartPlan:
+    data = model_dump_compat(plan)
+    data.update(updates)
+    return ChartPlan(**data)
+
+
+def _with_fallback_reason(plan: ChartPlan, reason: str) -> ChartPlan:
+    return _replace_plan(plan, reason=f"{reason} Fallback: {plan.reason}")
+
+
+def _compatible_dimension(df: pd.DataFrame, dimension: str | None) -> bool:
+    if not dimension or dimension not in df.columns:
+        return False
+    if pd.api.types.is_numeric_dtype(df[dimension]):
+        return False
+    return df[dimension].dropna().nunique() >= 1
+
+
+def _apply_chart_type_override(df: pd.DataFrame, prompt: str, plan: ChartPlan) -> ChartPlan:
+    requested = extract_prompt_chart_type(prompt)
+    if not requested:
+        return plan
+
+    if requested not in SUPPORTED_OVERRIDE_TYPES:
+        return _with_fallback_reason(
+            plan,
+            f"Requested {requested} chart is not supported by the current renderer.",
+        )
+
+    dimension = plan.dimension or _dimension_from_prompt(df, prompt)
+    metric = plan.metric
+    aggregation = plan.aggregation
+
+    if requested in {"pie", "donut"}:
+        if not _compatible_dimension(df, dimension):
+            return _with_fallback_reason(
+                plan,
+                f"Requested {requested} chart needs one categorical dimension.",
+            )
+        if aggregation != "count" and not (metric and metric in df.columns and pd.api.types.is_numeric_dtype(df[metric])):
+            return _with_fallback_reason(
+                plan,
+                f"Requested {requested} chart needs one numeric measure.",
+            )
+        category_count = int(df[dimension].dropna().nunique()) if dimension else 0
+        if category_count > 20:
+            return _with_fallback_reason(
+                plan,
+                f"Requested {requested} chart has too many categories ({category_count}); use a bar chart instead.",
+            )
+        note = (
+            f"User requested a {requested} chart; using top categories for readability."
+            if category_count > 8
+            else f"User requested a {requested} chart and the columns are compatible."
+        )
+        return _replace_plan(
+            plan,
+            chart_type=requested,
+            dimension=dimension,
+            metric=metric,
+            aggregation=aggregation,
+            sort="desc",
+            limit=8,
+            reason=note,
+        )
+
+    if requested == "scatter":
+        first = metric if metric and metric in df.columns and pd.api.types.is_numeric_dtype(df[metric]) else _first_numeric_not(df, set())
+        second = plan.second_metric
+        if not second or second == first or second not in df.columns or not pd.api.types.is_numeric_dtype(df[second]):
+            second = _first_numeric_not(df, {first} if first else set())
+        if not first or not second:
+            return _with_fallback_reason(
+                plan,
+                "Requested scatter chart needs two numeric measures.",
+            )
+        return _replace_plan(
+            plan,
+            chart_type="scatter",
+            metric=first,
+            second_metric=second,
+            dimension=dimension,
+            aggregation="mean",
+            sort="none",
+            limit=30,
+            reason="User requested a scatter chart and two numeric measures were found.",
+        )
+
+    if requested in {"bar", "line", "area"}:
+        if not dimension:
+            return _with_fallback_reason(
+                plan,
+                f"Requested {requested} chart needs a grouping or time dimension.",
+            )
+        if aggregation != "count" and not (metric and metric in df.columns and pd.api.types.is_numeric_dtype(df[metric])):
+            return _with_fallback_reason(
+                plan,
+                f"Requested {requested} chart needs a numeric measure.",
+            )
+        return _replace_plan(
+            plan,
+            chart_type=requested,
+            dimension=dimension,
+            metric=metric,
+            aggregation=aggregation,
+            sort="asc" if requested in {"line", "area"} else "desc",
+            limit=30 if requested in {"line", "area"} else min(plan.limit or 5, 8),
+            reason=f"User explicitly requested a {requested} chart and the columns are compatible.",
+        )
+
+    return plan
 
 
 def _ascii(value: str) -> str:
@@ -338,13 +472,13 @@ async def generate_prompt_chart_plan(
 
         if not issues:
             if local_plan and local_plan.priority >= 5 and not _same_plan_shape(plan, local_plan):
-                return local_plan
-            return plan
+                return _apply_chart_type_override(df, prompt, local_plan)
+            return _apply_chart_type_override(df, prompt, plan)
 
         if local_plan:
-            return local_plan
-        return _local_prompt_plan(df, prompt)
+            return _apply_chart_type_override(df, prompt, local_plan)
+        return _apply_chart_type_override(df, prompt, _local_prompt_plan(df, prompt))
 
     except Exception:
         # Groq unavailable or failed; use local planner.
-        return _local_prompt_plan(df, prompt)
+        return _apply_chart_type_override(df, prompt, _local_prompt_plan(df, prompt))

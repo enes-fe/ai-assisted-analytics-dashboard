@@ -34,7 +34,7 @@ ColumnRole = Literal[
 ]
 Aggregation = Literal["sum", "mean", "count", "min", "max", "none"]
 ChartAggregation = Literal["sum", "mean", "count", "min", "max"]
-ChartType = Literal["bar", "line", "pie", "scatter", "area", "table"]
+ChartType = Literal["bar", "line", "pie", "donut", "scatter", "area", "table"]
 SortOrder = Literal["asc", "desc", "none"]
 
 

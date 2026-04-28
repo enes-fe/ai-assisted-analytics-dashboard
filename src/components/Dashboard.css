@@ -372,7 +372,8 @@
 
 /* Dropdown & Menus */
 .card-actions-wrapper,
-.settings-wrapper {
+.settings-wrapper,
+.export-wrapper {
   position: relative;
   display: flex;
   align-items: center;
@@ -426,6 +427,10 @@
 
 .global-settings {
   width: 220px;
+}
+
+.export-dropdown {
+  width: 190px;
 }
 
 @keyframes slideIn {
