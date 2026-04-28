@@ -8,7 +8,7 @@ import pandas as pd
 
 from .column_cards import build_column_cards
 from .ollama_client import call_ollama_structured
-from .schemas import ChartPlan, ColumnSemantic, SemanticDatasetPlan, model_dump_compat
+from .schemas import ChartPlan, ColumnSemantic, SemanticDatasetPlan
 
 
 def _env_int(name: str, default: int) -> int:
@@ -287,9 +287,202 @@ def _needs_local_enhancement(plan: SemanticDatasetPlan, df: pd.DataFrame) -> boo
         return True
     return False
 
+def _detect_domain_from_columns(df: pd.DataFrame, current_domain: str | None) -> str:
+    names = " ".join(_norm(col) for col in df.columns)
+    scores = {
+        "football_soccer": ["player", "team", "club", "position", "goal", "gol", "assist", "asist", "rating", "xg", "shot", "minute", "match"],
+        "sales": ["sales", "revenue", "profit", "margin", "quantity", "order", "product", "region", "customer"],
+        "hr": ["employee", "department", "salary", "attrition", "performance", "overtime", "tenure"],
+        "logistics": ["delivery", "delay", "leadtime", "route", "vendor", "shipment", "stock", "inventory", "cost"],
+        "finance": ["amount", "price", "cost", "balance", "transaction", "revenue", "profit"],
+    }
+    best_domain = current_domain or "general_business"
+    best_score = 0
+    for domain, keywords in scores.items():
+        score = sum(1 for keyword in keywords if keyword in names)
+        if score > best_score:
+            best_domain = domain
+            best_score = score
+    return best_domain
+
+
+def _role_for_column(df: pd.DataFrame, col: str, domain: str) -> tuple[str, str, int, str]:
+    name = _norm(col)
+    is_numeric = pd.api.types.is_numeric_dtype(df[col])
+
+    if any(k in name for k in ["id", "uuid", "code", "key"]):
+        return "identifier", "Identifier column", 1, "none"
+    if any(k in name for k in ["date", "time", "tarih", "orderdate"]):
+        return "time", "Time axis for trend analysis", 4, "none"
+
+    if domain == "football_soccer":
+        if any(k in name for k in ["player", "oyuncu"]):
+            return "primary_entity", "Player name", 5, "none"
+        if any(k in name for k in ["team", "club", "position"]):
+            return "dimension", "Football grouping dimension", 4, "none"
+        if is_numeric and any(k in name for k in ["goal", "gol", "assist", "asist", "rating", "xg"]):
+            agg = "mean" if "rating" in name else "sum"
+            return "primary_metric", "Key player performance metric", 5, agg
+        if is_numeric and any(k in name for k in ["shot", "minute"]):
+            return "secondary_metric", "Supporting player performance metric", 4, "sum"
+
+    if domain == "sales":
+        if any(k in name for k in ["product", "region", "customer"]):
+            return "dimension", "Sales grouping dimension", 4, "none"
+        if is_numeric and any(k in name for k in ["sales", "revenue", "profit", "quantity"]):
+            return "primary_metric", "Key sales performance metric", 5, "sum"
+        if is_numeric and "margin" in name:
+            return "secondary_metric", "Profitability rate metric", 4, "mean"
+
+    if domain == "hr":
+        if any(k in name for k in ["employee", "department", "role"]):
+            return "dimension", "HR grouping dimension", 4, "none"
+        if is_numeric and any(k in name for k in ["salary", "performance", "overtime", "tenure"]):
+            return "primary_metric", "Key workforce metric", 4, "mean"
+
+    if domain == "logistics":
+        if any(k in name for k in ["route", "vendor", "shipment"]):
+            return "dimension", "Logistics grouping dimension", 4, "none"
+        if is_numeric and any(k in name for k in ["delivery", "delay", "leadtime", "stock", "quantity", "cost"]):
+            return "primary_metric", "Key logistics metric", 4, "sum"
+
+    if is_numeric:
+        return "secondary_metric", "Numeric analytical measure", 3, "mean"
+    return "dimension", "Categorical grouping dimension", 3, "none"
+
+
+def _make_chart(
+    chart_type: str,
+    title: str,
+    metric: str | None,
+    dimension: str | None,
+    aggregation: str,
+    reason: str,
+    priority: int,
+    second_metric: str | None = None,
+    sort: str = "desc",
+    limit: int = 10,
+) -> ChartPlan:
+    return ChartPlan(
+        chart_type=chart_type,
+        title=title,
+        metric=metric,
+        second_metric=second_metric,
+        dimension=dimension,
+        aggregation=aggregation,
+        sort=sort,
+        limit=limit,
+        reason=reason,
+        priority=priority,
+    )
+
+
+def _local_recommendations(df: pd.DataFrame, domain: str) -> list[ChartPlan]:
+    charts: list[ChartPlan] = []
+    player = _find_column(df, ["player", "oyuncu"], numeric=False)
+    team = _find_column(df, ["team", "club"], numeric=False)
+    goals = _find_column(df, ["goals", "goal", "gol"], numeric=True)
+    assists = _find_column(df, ["assists", "assist", "asist"], numeric=True)
+    rating = _find_column(df, ["rating"], numeric=True)
+    sales = _find_column(df, ["sales", "revenue"], numeric=True)
+    profit = _find_column(df, ["profit"], numeric=True)
+    product = _find_column(df, ["product"], numeric=False)
+    region = _find_column(df, ["region"], numeric=False)
+    date = _find_column(df, ["date", "tarih"], numeric=None)
+
+    if domain == "football_soccer":
+        if player and goals:
+            charts.append(_make_chart("bar", f"Top Goals by {player}", goals, player, "sum", "Goals are a primary football performance metric.", 5))
+        if player and assists:
+            charts.append(_make_chart("bar", f"Top Assists by {player}", assists, player, "sum", "Assists are a primary football performance metric.", 5))
+        if goals and assists:
+            charts.append(_make_chart("scatter", f"{goals} vs {assists}", goals, None, "mean", "Shows the relationship between scoring and chance creation.", 5, second_metric=assists, sort="none"))
+        if team and goals:
+            charts.append(_make_chart("bar", f"Total {goals} by {team}", goals, team, "sum", "Team-level scoring distribution.", 4))
+        if player and rating:
+            charts.append(_make_chart("bar", f"Average {rating} by {player}", rating, player, "mean", "Player rating highlights overall performance.", 4))
+
+    if domain == "sales":
+        if region and sales:
+            charts.append(_make_chart("bar", f"Total {sales} by {region}", sales, region, "sum", "Regional sales performance.", 5))
+        if product and sales:
+            charts.append(_make_chart("bar", f"Total {sales} by {product}", sales, product, "sum", "Product sales performance.", 5))
+        if profit and sales:
+            charts.append(_make_chart("scatter", f"{sales} vs {profit}", sales, None, "mean", "Compares revenue and profitability.", 4, second_metric=profit, sort="none"))
+        if date and sales:
+            charts.append(_make_chart("line", f"{sales} Trend", sales, date, "sum", "Sales trend over time.", 4, sort="asc", limit=30))
+        if region and profit:
+            charts.append(_make_chart("bar", f"Total {profit} by {region}", profit, region, "sum", "Regional profit performance.", 4))
+
+    if not charts:
+        numeric_cols = [str(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+        categorical_cols = [str(c) for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
+        if categorical_cols and numeric_cols:
+            charts.append(_make_chart("bar", f"{numeric_cols[0]} by {categorical_cols[0]}", numeric_cols[0], categorical_cols[0], "mean", "General numeric comparison by category.", 3))
+        if len(numeric_cols) >= 2:
+            charts.append(_make_chart("scatter", f"{numeric_cols[0]} vs {numeric_cols[1]}", numeric_cols[0], None, "mean", "General relationship between numeric columns.", 3, second_metric=numeric_cols[1], sort="none"))
+
+    return charts[:8]
+
+
+def _enhance_plan_locally(plan: SemanticDatasetPlan, df: pd.DataFrame) -> SemanticDatasetPlan:
+    domain = _detect_domain_from_columns(df, plan.detected_domain)
+    existing_semantics = {item.name: item for item in plan.column_semantics if item.name in df.columns}
+    local_semantics: list[ColumnSemantic] = []
+
+    for col in map(str, df.columns.tolist()):
+        role, meaning, importance, aggregation = _role_for_column(df, col, domain)
+        current = existing_semantics.get(col)
+        if current and current.role not in {"noise", "dimension"}:
+            local_semantics.append(current)
+        else:
+            local_semantics.append(
+                ColumnSemantic(
+                    name=col,
+                    role=role,
+                    business_meaning=meaning,
+                    importance=importance,
+                    preferred_aggregation=aggregation,
+                )
+            )
+
+    primary_entity = plan.primary_entity
+    if not primary_entity or primary_entity not in df.columns:
+        primary_entity = next((item.name for item in local_semantics if item.role == "primary_entity"), None)
+
+    local_charts = _local_recommendations(df, domain)
+    existing = {
+        (chart.chart_type, chart.metric, chart.second_metric, chart.dimension, chart.aggregation)
+        for chart in local_charts
+    }
+    merged_charts = list(local_charts)
+    for chart in plan.recommended_charts:
+        key = (chart.chart_type, chart.metric, chart.second_metric, chart.dimension, chart.aggregation)
+        if key not in existing:
+            merged_charts.append(chart)
+            existing.add(key)
+
+    return SemanticDatasetPlan(
+        detected_domain=domain,
+        primary_entity=primary_entity,
+        column_semantics=local_semantics,
+        recommended_charts=merged_charts[:8],
+    )
+
+
+def _needs_local_enhancement(plan: SemanticDatasetPlan, df: pd.DataFrame) -> bool:
+    if not plan.column_semantics:
+        return True
+    if _semantic_issues(plan, df):
+        return True
+    important_roles = {"primary_metric", "primary_entity"}
+    if not any(item.role in important_roles and item.importance >= 4 for item in plan.column_semantics):
+        return True
+    return False
+
 
 async def generate_semantic_dataset_plan(df: pd.DataFrame) -> SemanticDatasetPlan:
-    max_cols = _env_int("AI_MAX_COLUMN_CARDS", 60)
+    max_cols = _env_int("AI_MAX_COLUMN_CARDS", 25)
     max_charts = _env_int("AI_MAX_RECOMMENDED_CHARTS", 8)
     cards = build_column_cards(df, max_cols=max_cols)
     messages = [
@@ -303,30 +496,11 @@ async def generate_semantic_dataset_plan(df: pd.DataFrame) -> SemanticDatasetPla
             ),
         },
     ]
-    plan = await call_ollama_structured(messages, SemanticDatasetPlan)
-    issues = _semantic_issues(plan, df)
-    if not issues and not _needs_local_enhancement(plan, df):
-        return plan
-
-    repair_messages = messages + [
-        {
-            "role": "assistant",
-            "content": json.dumps(model_dump_compat(plan), ensure_ascii=False),
-        },
-        {
-            "role": "user",
-            "content": (
-                "The JSON was syntactically valid but semantically invalid. "
-                "Fix these issues and return the full JSON plan again. "
-                f"Existing columns are: {list(map(str, df.columns.tolist()))}. "
-                f"Issues: {issues}"
-            ),
-        },
-    ]
-    try:
-        repaired = await call_ollama_structured(repair_messages, SemanticDatasetPlan)
-    except Exception:
-        return _enhance_plan_locally(plan, df)
-    if _needs_local_enhancement(repaired, df):
-        return _enhance_plan_locally(repaired, df)
-    return repaired
+    plan = await call_ollama_structured(
+        messages,
+        SemanticDatasetPlan,
+        timeout_env="AI_SEMANTIC_TIMEOUT_SECONDS",
+        timeout_default=20,
+    )
+    # Skip second LLM call (repair) — local enhancement is reliable and faster
+    return _enhance_plan_locally(plan, df)
