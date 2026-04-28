@@ -68,17 +68,70 @@ def is_id_column(col_name: str, series: pd.Series) -> bool:
 
     unique_ratio = series.nunique() / len(series) if len(series) > 0 else 0
 
+    entity_name_patterns = ["player", "oyuncu"]
+    if any(p in name_lower for p in entity_name_patterns):
+        return False
+
     # High-cardinality text fields often behave like identifiers. High-cardinality
     # numeric measures are common in analytics and should remain testable.
     if not pd.api.types.is_numeric_dtype(series) and unique_ratio > 0.95 and len(series) > 50:
         return True
 
-    name_patterns = ["name", "title", "label", "description", "isim", "ad", "player"]
+    name_patterns = ["name", "title", "label", "description", "isim", "ad"]
     if any(p in name_lower for p in name_patterns):
         if unique_ratio > 0.8:
             return True
 
     return False
+
+
+def select_label_column(
+    df: pd.DataFrame,
+    preferred: str | None = None,
+    exclude: list[str] | set[str] | tuple[str, ...] | None = None,
+) -> str | None:
+    """Pick a human-readable text column for scatter/cluster point labels."""
+    excluded = set(exclude or [])
+    entity_keywords = [
+        "playername", "player", "oyuncu", "customername", "customer", "musteri",
+        "productname", "product", "urun", "team", "club", "employee", "name",
+        "isim", "label", "title", "category", "region", "department",
+    ]
+    obvious_id_tokens = ["id", "uuid", "pk", "fk", "key", "code", "ref", "hash"]
+
+    def _norm(value: str) -> str:
+        return str(value).lower().replace("_", "").replace("-", "").replace(" ", "")
+
+    def _usable(col: str) -> bool:
+        if col in excluded or col not in df.columns:
+            return False
+        if pd.api.types.is_numeric_dtype(df[col]):
+            return False
+        normalized = _norm(col)
+        if any(normalized == token or normalized.endswith(token) for token in obvious_id_tokens):
+            return False
+        return df[col].dropna().astype(str).str.strip().ne("").any()
+
+    if preferred and _usable(preferred):
+        return preferred
+
+    scored: list[tuple[int, int, str]] = []
+    for col in df.columns:
+        col_name = str(col)
+        if not _usable(col_name):
+            continue
+        normalized = _norm(col_name)
+        score = 0
+        for idx, keyword in enumerate(entity_keywords):
+            if keyword in normalized:
+                score = max(score, 100 - idx)
+        unique_count = int(df[col].nunique(dropna=True))
+        scored.append((score, unique_count, col_name))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return scored[0][2]
 
 
 def is_tautology(col_a: str, col_b: str) -> bool:

@@ -16,16 +16,23 @@ from .column_profiler import get_central_cols
 
 # ─── Domain heuristics ────────────────────────────────────────────────────────
 
+import re
+
 MEANINGLESS_TOTAL_PATTERNS = [
     "delta", "diff", "duration", "elapsed", "lag", "offset",
     "tenure", "age_days", "day_count", "days_since", "days_to",
     "lead_time", "cycle_time",
 ]
 
+# Negative prefixes: columns starting with these are likely error/incident metrics, not KPIs
+NEGATIVE_PREFIX_PATTERNS = [
+    "error", "fault", "fail", "penalty", "violation", "foul", "incident", "warning",
+]
+
 DOMAIN_PRIORITY_KW = [
     "revenue", "profit", "sales", "income", "margin", "earning",
     "goal", "assist", "score", "match", "game", "gol", "asist", "mac",
-    "salary", "cost", "price", "amount", "total", "count", "volume",
+    "salary", "cost", "price", "amount", "total", "volume",
     "rating", "satisfaction", "conversion", "churn", "retention",
 ]
 
@@ -35,9 +42,27 @@ def is_meaningless_total(col_name: str) -> bool:
     return any(p in col_lower for p in MEANINGLESS_TOTAL_PATTERNS)
 
 
+def _word_in_col(col_lower: str, keyword: str) -> bool:
+    """Return True only if keyword appears as a word-boundary token in col_lower.
+    E.g. 'goal' matches 'goals' or 'total_goal' but NOT 'errorLeadToGoal'.
+    """
+    # Split by common delimiters and check each token
+    tokens = re.split(r'[_\s\-]+', col_lower)
+    # Also handle camelCase: 'errorLeadToGoal' -> ['error', 'lead', 'to', 'goal']
+    camel_tokens: list[str] = []
+    for t in tokens:
+        camel_tokens.extend(re.findall(r'[a-z]+|[0-9]+', re.sub(r'([A-Z])', r'_\1', t).lower()))
+    all_tokens = set(tokens) | set(camel_tokens)
+    return any(kw == tok or tok.startswith(kw) for tok in all_tokens for kw in [keyword])
+
+
 def domain_priority(col_name: str) -> int:
     col_lower = col_name.lower()
-    return 1 if any(kw in col_lower for kw in DOMAIN_PRIORITY_KW) else 0
+    # Negative prefix check: if column starts with an error/fault prefix → deprioritize
+    norm = col_lower.replace("_", "").replace(" ", "")
+    if any(norm.startswith(p) for p in NEGATIVE_PREFIX_PATTERNS):
+        return -1
+    return 1 if any(_word_in_col(col_lower, kw) for kw in DOMAIN_PRIORITY_KW) else 0
 
 
 # ─── Histogram skip heuristic (used by chart_generator) ──────────────────────
@@ -96,15 +121,22 @@ def calculate_kpis(df: pd.DataFrame) -> list:
         except Exception:
             continue
 
-    # ── Filter meaningless columns ────────────────────────────────────────────
-    num_cols = [c for c in num_cols if not is_meaningless_total(c) and not is_id_column(c, df[c])]
+    # ── Filter meaningless columns ────────────────────────────────────────────────
+    num_cols = [
+        c for c in num_cols
+        if not is_meaningless_total(c)
+        and not is_id_column(c, df[c])
+        and domain_priority(c) >= 0  # Exclude error/fault/penalty columns
+        and df[c].dropna().nunique() > 2  # Exclude binary (0/1) columns
+    ]
     if not num_cols:
-        num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        # Relax binary filter only as last resort
+        num_cols = [c for c in df.select_dtypes(include=[np.number]).columns.tolist() if not is_id_column(c, df[c])]
 
-    # ── Prioritise domain-relevant columns ────────────────────────────────────
+    # ── Prioritise domain-relevant columns ──────────────────────────────────────────
     num_cols_sorted = sorted(num_cols, key=lambda c: domain_priority(c), reverse=True)
 
-    # ── Sort DataFrame by date if available ───────────────────────────────────
+    # ── Sort DataFrame by date if available ──────────────────────────────────────────
     work_df = df.copy()
     if date_col:
         try:
@@ -113,7 +145,15 @@ def calculate_kpis(df: pd.DataFrame) -> list:
         except Exception:
             pass
 
-    top_cols = get_central_cols(df, num_cols_sorted, top_n=4)
+    # Domain-priority columns first; fill remaining slots with centrality selection
+    priority_cols = [c for c in num_cols_sorted if domain_priority(c) >= 1][:4]
+    if len(priority_cols) < 4:
+        remaining = [c for c in num_cols_sorted if c not in priority_cols]
+        extra = get_central_cols(df, remaining, top_n=4 - len(priority_cols)) if remaining else []
+        top_cols = priority_cols + extra
+    else:
+        top_cols = priority_cols
+
     kpis: list = []
 
     for i, col in enumerate(top_cols):
@@ -128,10 +168,9 @@ def calculate_kpis(df: pd.DataFrame) -> list:
 
         try:
             col_lower = col.lower()
-            is_percentage = any(x in col_lower for x in ["percent", "ratio", "rate", "pct", "%", "accuracy", "completion"])
-            if not is_percentage:
-                if series.max() <= 100 and series.min() >= 0 and series.mean() <= 100 and "id" not in col_lower and "year" not in col_lower:
-                    is_percentage = True
+            # Only treat as percentage when the column name explicitly signals it
+            PERCENT_KEYWORDS = ["percent", "percentage", "ratio", "rate", "pct", "%", "accuracy", "completion"]
+            is_percentage = any(x in col_lower for x in PERCENT_KEYWORDS)
 
             if is_percentage:
                 raw_val = series.mean()
@@ -168,18 +207,29 @@ def calculate_kpis(df: pd.DataFrame) -> list:
                     trend_str = f"{'+' if pct_change >= 0 else ''}{pct_change:.1f}%"
                     trend_dir = "up" if pct_change > 1 else "down" if pct_change < -1 else "neutral"
 
+            # ── Insight ───────────────────────────────────────────────────────
+            unique_count = series.nunique()
+            if unique_count <= 2:
+                insight = "İkili (binary) veri sütunu; KPI yorumu sınırlı."
+            elif is_percentage:
+                insight = f"Ortalama: {value:.1f}% — {'Artış' if trend_dir == 'up' else 'Düşüş' if trend_dir == 'down' else 'Stabil'}."
+            elif value == 0:
+                insight = "Tüm dönemde kayıt sıfır."
+            elif trend_dir == "neutral":
+                insight = f"Değerler dönem boyunca stabil seyretti ({trend_str})."
+            else:
+                direction_text = "yükseliş" if trend_dir == "up" else "düşüş"
+                insight = f"Dönem içi {direction_text} trendi: {trend_str}."
+
             kpis.append({
                 "id": f"kpi-{i}",
-                "title": f"{title_prefix} {col}",
+                "title": f"{title_prefix} {format_col_name(col)}",
                 "value": formatted_val,
                 "rawValue": value,
                 "trend": trend_str,
                 "trendDirection": trend_dir,
-                "insight": (
-                    "Values are currently "
-                    + ("trending up" if trend_dir == "up" else "trending down" if trend_dir == "down" else "stable")
-                    + "."
-                ),
+                "insight": insight,
+                "column": col,
             })
         except Exception as e:
             print(f"[KPI] Error calculating KPI for {col}: {e}")

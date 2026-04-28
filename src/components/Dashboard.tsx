@@ -6,7 +6,7 @@ import type { ChartConfig } from './ChartWidget';
 import KPICard from './KPICard';
 import type { KPIConfig } from './KPICard';
 import DataGrid from './DataGrid';
-import { Download, Settings, FileText, LayoutGrid, Unlock } from 'lucide-react';
+import { Download, Settings, FileText, LayoutGrid, Unlock, X, Check, AlertTriangle } from 'lucide-react';
 import { useToast } from './useToast';
 import { useLang } from '../contexts/useLang';
 import html2canvas from 'html2canvas';
@@ -18,7 +18,8 @@ import 'react-resizable/css/styles.css';
 import './Dashboard.css';
 
 
-type AnalysisPhase = 'idle' | 'uploading' | 'reading' | 'clustering' | 'metrics' | 'complete';
+type AnalysisPhase = 'idle' | 'uploading' | 'complete';
+type AiDashboardStatus = 'idle' | 'loading' | 'success' | 'timeout' | 'error';
 
 interface DashboardProps {
   pendingSelection?: PendingSelection | null;
@@ -36,12 +37,20 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
   const [filename, setFilename] = useState('');
 
   const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>('idle');
+  const [aiStatus, setAiStatus] = useState<AiDashboardStatus>('idle');
+  const [aiMessage, setAiMessage] = useState<string>('');
   const [isReArchitecting, setIsReArchitecting] = useState(false);
   const [activeTab, setActiveTab] = useState<'insights' | 'data'>('insights');
   const [numberFormat, setNumberFormat] = useState<'compact' | 'full'>('compact');
   const [showSettings, setShowSettings] = useState(false);
   const [mlCharts, setMlCharts] = useState<ChartConfig[]>([]);
+  const [forecastMessage, setForecastMessage] = useState('');
   const [isGridLayout, setIsGridLayout] = useState(false);
+  // KPI config panel
+  const [showKpiPanel, setShowKpiPanel] = useState(false);
+  const [availableKpiCols, setAvailableKpiCols] = useState<{column: string; label: string; priority: number; is_binary: boolean}[]>([]);
+  const [selectedKpiCols, setSelectedKpiCols] = useState<string[]>([]);
+  const [kpiLoading, setKpiLoading] = useState(false);
   const [layouts, setLayouts] = useState<any>(() => {
     try {
       const saved = localStorage.getItem('dashboard_layouts');
@@ -95,14 +104,17 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
     onPendingConsumed?.();
 
     if ('reset' in pendingSelection) {
-      // User clicked "Yeni Veri Seti" → go back to upload
       setDatasetId(null);
       setData(null);
       setColumns([]);
       setCharts([]);
       setKpiData([]);
+      setAvailableKpiCols([]);
+      setSelectedKpiCols([]);
       setMlCharts([]);
+      setForecastMessage('');
       setAnalysisPhase('idle');
+      setAiStatus('idle');
       onDatasetIdChange?.(null);
       return;
     }
@@ -116,15 +128,16 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
 
     setKpiData([]);
     setCharts([]);
+    setAvailableKpiCols([]);
+    setSelectedKpiCols([]);
     setMlCharts([]);
-    setAnalysisPhase('reading');
+    setForecastMessage('');
+    setAnalysisPhase('complete'); // show data immediately
+    setAiStatus('idle');
 
     onDatasetIdChange?.(selection.dataset_id);
 
-    setTimeout(() => {
-      setAnalysisPhase('metrics');
-      fetchCoreAnalytics(selection.dataset_id);
-    }, 400);
+    startFullAnalysis(selection.dataset_id, 400, 800);
 
     showToast(t.sidebar.uploadedToast(selection.filename), 'success');
   }, [pendingSelection]);
@@ -135,54 +148,80 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
   const handleUploadError = () => setAnalysisPhase('idle');
 
   const handleDataLoaded = (response: UploadResponse) => {
-    setAnalysisPhase('reading');
+    // Show dataset immediately — don't block on AI
     setDatasetId(response.dataset_id);
     setColumns(response.columns);
     setData(response.data);
     setRowCount(response.row_count);
     setFilename(response.filename || 'Yeni Veri Seti');
-
     setKpiData([]);
     setCharts([]);
+    setAvailableKpiCols([]);
+    setSelectedKpiCols([]);
     setMlCharts([]);
+    setForecastMessage('');
+    setAnalysisPhase('complete');
+    setAiStatus('idle');
 
     onDatasetIdChange?.(response.dataset_id);
 
-    setTimeout(() => {
-      setAnalysisPhase('metrics');
-      fetchCoreAnalytics(response.dataset_id);
-    }, 500);
+    showToast(`${response.filename || 'Dataset'} yüklendi.`, 'success');
+
+    startFullAnalysis(response.dataset_id, 300, 800);
   };
 
-  // ─── Analytics fetchers ────────────────────────────────────────
-  const fetchCoreAnalytics = async (id: number) => {
+  function startFullAnalysis(id: number, aiDelay = 300, mlDelay = 800) {
+    setTimeout(() => {
+      fetchAIDashboard(id);
+    }, aiDelay);
+
+    setTimeout(() => {
+      fetchMLAnalytics(id);
+    }, mlDelay);
+  }
+
+  // ─── AI Fast Dashboard ─────────────────────────────────────────
+  const fetchAIDashboard = async (id: number) => {
+    setAiStatus('loading');
+    setAiMessage('');
     try {
-      const res = await fetch(`/api/analytics/core/${id}`);
-      if (!res.ok) throw new Error('Core analytics failed');
+      const res = await fetch(`/api/ai/fast-dashboard/${id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const resData = await res.json();
 
-      setKpiData(resData.kpis);
-      setCharts(resData.charts);
-      setAnalysisPhase('complete');
-      fetchMLAnalytics(id);
+      if (resData.status === 'success') {
+        if (resData.kpis?.length > 0) setKpiData(resData.kpis);
+        if (resData.charts?.length > 0) setCharts(resData.charts);
+        setAiStatus('success');
+      } else if (resData.status === 'timeout') {
+        setAiStatus('timeout');
+        setAiMessage(resData.message || 'AI analizi zaman aşımına uğradı.');
+      } else {
+        setAiStatus('error');
+        setAiMessage(resData.message || 'AI analizi başarısız oldu.');
+      }
     } catch (e) {
-      console.error('Core Analytics failed', e);
-      showToast(d.coreError, 'error');
-      setAnalysisPhase('complete');
+      console.error('AI fast dashboard failed', e);
+      setAiStatus('error');
+      setAiMessage('AI semantic dashboard yüklenemedi.');
     }
-
   };
 
   const fetchMLAnalytics = async (id: number, clusterCols?: string[]) => {
+    setForecastMessage('');
     try {
-      fetch(`/api/ml/forecast/${id}`)
-        .then(res => res.json())
-        .then(resData => {
-          if (resData.charts) {
-            setMlCharts(prev => [...prev.filter(c => c.type !== 'forecast'), ...resData.charts]);
-          }
-        })
-        .catch(() => { });
+      try {
+        const forecastRes = await fetch(`/api/ml/forecast/${id}`);
+        const forecastData = await forecastRes.json();
+        if (forecastData.charts?.length > 0) {
+          setMlCharts(prev => [...prev.filter(c => c.type !== 'forecast'), ...forecastData.charts]);
+        } else {
+          setMlCharts(prev => prev.filter(c => c.type !== 'forecast'));
+          setForecastMessage(forecastData.error || 'Forecast hazirlanamadi: uygun zaman serisi bulunamadi.');
+        }
+      } catch {
+        setForecastMessage('Forecast hazirlanamadi: forecast servisine ulasilamadi.');
+      }
 
       const clusterRes = await fetch(`/api/ml/cluster/${id}`, {
         method: 'POST',
@@ -199,6 +238,40 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
   };
 
   // ─── AI Prompt ─────────────────────────────────────────────────
+  const openKpiPanel = async () => {
+    if (!datasetId) return;
+    setShowKpiPanel(true);
+    if (availableKpiCols.length === 0) {
+      try {
+        const res = await fetch(`/api/kpi/columns/${datasetId}`);
+        const data = await res.json();
+        setAvailableKpiCols(data.columns || []);
+      } catch {
+        showToast('KPI kolonları yüklenemedi.', 'error');
+      }
+    }
+    setSelectedKpiCols(kpiData.map((k: any) => k.column).filter(Boolean));
+  };
+
+  const applyKpiSelection = async () => {
+    if (!datasetId) return;
+    setKpiLoading(true);
+    try {
+      const res = await fetch(`/api/kpi/calculate/${datasetId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ columns: selectedKpiCols }),
+      });
+      const data = await res.json();
+      if (data.kpis) setKpiData(data.kpis);
+      setShowKpiPanel(false);
+    } catch {
+      showToast('KPI hesaplanamadı.', 'error');
+    } finally {
+      setKpiLoading(false);
+    }
+  };
+
   const handleAIGenerate = async (prompt: string) => {
     if (!datasetId) return;
     setIsReArchitecting(true);
@@ -211,7 +284,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
       const resData = await response.json();
 
       if (!resData.charts || resData.charts.length === 0) {
-        showToast(d.noChart, 'error');
+        showToast(resData.message || d.noChart, 'error');
         setIsReArchitecting(false);
         return;
       }
@@ -264,8 +337,8 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
         backgroundColor: getComputedStyle(document.documentElement)
           .getPropertyValue('--bg-app')
           .trim(),
-        scrollX: -window.scrollX, // PDF Kenar kesilme düzeltmesi
-        scrollY: -window.scrollY, // PDF Kenar kesilme düzeltmesi
+        scrollX: -window.scrollX,
+        scrollY: -window.scrollY,
         windowWidth: element.scrollWidth,
         windowHeight: element.scrollHeight,
       });
@@ -323,7 +396,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
 
   const allCharts = useMemo(() => [...charts, ...mlCharts], [charts, mlCharts]);
 
-  // Remove a chart by id (works for both AI-generated and heuristic charts)
+  // Remove a chart by id
   const handleRemoveChart = useCallback((chartId: string) => {
     setCharts(prev => prev.filter(c => c.id !== chartId));
     setMlCharts(prev => prev.filter(c => c.id !== chartId));
@@ -331,51 +404,19 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
   }, [d.chartRemoved, showToast]);
 
 
-  // ─── Loading state ─────────────────────────────────────────────
-  if (analysisPhase !== 'idle' && analysisPhase !== 'complete') {
-    const steps = [
-      { phase: 'uploading', label: d.loading.uploading, sub: d.loading.uploadSub },
-      { phase: 'reading',   label: d.loading.reading,   sub: d.loading.analysisSub },
-      { phase: 'metrics',   label: d.loading.metrics,   sub: d.loading.analysisSub },
-    ];
-    const currentStep = steps.findIndex(s => s.phase === analysisPhase);
-    const progressPct = ((currentStep + 1) / steps.length) * 100;
-    const active = steps[currentStep] || steps[0];
-
+  // ─── Upload state ──────────────────────────────────────────────
+  if (analysisPhase === 'uploading') {
     return (
       <div className="dashboard-container center-content">
         <div className="analysis-loader-container">
-          <div className="step-progress-wrapper">
-            {/* Step indicators */}
-            <div className="step-indicators">
-              {steps.map((s, i) => (
-                <div key={s.phase} className={`step-dot-group ${i < currentStep ? 'done' : i === currentStep ? 'active' : 'pending'}`}>
-                  <div className="step-dot">
-                    {i < currentStep ? '✓' : i + 1}
-                  </div>
-                  {i < steps.length - 1 && <div className="step-line" />}
-                </div>
-              ))}
-            </div>
-            {/* Progress bar */}
-            <div className="step-progress-bar">
-              <div className="step-progress-fill" style={{ width: `${progressPct}%` }} />
-            </div>
-          </div>
           <div className="spinner" />
-          <div className="analysis-text">{active.label}</div>
-          <div className="analysis-subtext">{active.sub}</div>
-          <button className="btn-secondary" style={{ marginTop: '2rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.2)' }} onClick={() => setAnalysisPhase('idle')}>
-            {d.loading.cancel}
-          </button>
+          <div className="analysis-text">Dosya yükleniyor…</div>
+          <div className="analysis-subtext">Lütfen bekleyin.</div>
         </div>
       </div>
     );
-
   }
 
-
-  // ─── Upload state ──────────────────────────────────────────────
   if (!datasetId && analysisPhase === 'idle') {
     return (
       <div className="dashboard-container center-content">
@@ -405,7 +446,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
           </div>
         </div>
 
-        <div className="dashboard-actions">
+          <div className="dashboard-actions">
           <div className="settings-wrapper" ref={settingsRef}>
             <button className={`btn-secondary icon-btn-only ${showSettings ? 'active' : ''}`} onClick={() => setShowSettings(!showSettings)} title="Ayarlar">
               <Settings size={18} />
@@ -439,7 +480,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
         <DataGrid datasetId={datasetId!} columns={columns} />
       ) : (
         <div className="insights-container">
-          <AIPrompt onGenerate={handleAIGenerate} columns={columns} />
+          <AIPrompt onGenerate={handleAIGenerate} />
 
           {isReArchitecting ? (
             <div className="analysis-loader-container" style={{ height: '40vh' }}>
@@ -448,12 +489,84 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
             </div>
           ) : (
             <>
-              {kpiData.length > 0 && (
-                <div className="kpi-grid">
-                  {kpiData.map(kpi => <KPICard key={kpi.id} config={kpi} numberFormat={numberFormat} />)}
+              {/* KPI Panel Overlay */}
+          {showKpiPanel && (
+            <div className="kpi-panel-overlay" onClick={() => setShowKpiPanel(false)}>
+              <div className="kpi-panel" onClick={e => e.stopPropagation()}>
+                <div className="kpi-panel-header">
+                  <span>KPI Kolonlarını Seç (maks. 4)</span>
+                  <button className="icon-btn-ghost" onClick={() => setShowKpiPanel(false)}><X size={16} /></button>
+                </div>
+                <div className="kpi-panel-list">
+                  {availableKpiCols.map(col => {
+                    const isSelected = selectedKpiCols.includes(col.column);
+                    return (
+                      <button
+                        key={col.column}
+                        className={`kpi-col-item ${isSelected ? 'selected' : ''} ${col.is_binary ? 'binary' : ''}`}
+                        onClick={() => {
+                          setSelectedKpiCols(prev =>
+                            isSelected
+                              ? prev.filter(c => c !== col.column)
+                              : prev.length >= 4 ? prev : [...prev, col.column]
+                          );
+                        }}
+                      >
+                        <span className="kpi-col-check">{isSelected && <Check size={12} />}</span>
+                        <span className="kpi-col-name">{col.label}</span>
+                        {col.priority >= 1 && <span className="kpi-col-badge priority">Önemli</span>}
+                        {col.is_binary && <span className="kpi-col-badge binary">Binary</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="kpi-panel-footer">
+                  <span className="kpi-panel-count">{selectedKpiCols.length}/4 seçili</span>
+                  <button
+                    className="btn-primary"
+                    disabled={selectedKpiCols.length === 0 || kpiLoading}
+                    onClick={applyKpiSelection}
+                  >
+                    {kpiLoading ? 'Hesaplanıyor...' : 'Uygula'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+              {/* AI Status Banner */}
+              {aiStatus === 'loading' && (
+                <div className="ai-status-banner ai-status-loading">
+                  <div className="spinner-sm" />
+                  <span>AI en anlamlı kolonları belirliyor…</span>
+                </div>
+              )}
+              {aiStatus === 'timeout' && (
+                <div className="ai-status-banner ai-status-warn">
+                  ⚠️ {aiMessage || 'AI semantic dashboard zaman aşımı nedeniyle oluşturulamadı.'}
+                </div>
+              )}
+              {aiStatus === 'error' && (
+                <div className="ai-status-banner ai-status-error">
+                  ❌ {aiMessage || 'AI semantic dashboard yüklenemedi.'}
                 </div>
               )}
 
+              {forecastMessage && (
+                <div className="ai-status-banner ai-status-warn">
+                  <AlertTriangle size={15} />
+                  <span>{forecastMessage}</span>
+                </div>
+              )}
+
+              {/* KPIs */}
+              {kpiData.length > 0 && (
+                <div className="kpi-grid">
+                  {kpiData.map(kpi => <KPICard key={kpi.id} config={kpi} numberFormat={numberFormat} onConfigure={openKpiPanel} />)}
+                </div>
+              )}
+
+              {/* Charts */}
               {isGridLayout ? (
                 <div ref={containerRef} className="charts-grid-container">
                   <ResponsiveGridLayout

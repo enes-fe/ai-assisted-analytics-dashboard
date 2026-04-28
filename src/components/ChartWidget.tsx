@@ -34,6 +34,18 @@ export interface ChartConfig {
   cluster_profiles?: any[];
   scatter_col_x?: string;
   scatter_col_y?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  projection_note?: string;
+  projection_method?: string;
+  aggregation_method?: string;
+  aggregation_label?: string;
+  silhouette_score?: number | null;
+  silhouette_quality?: string | null;
+  silhouette_text?: string;
+  labelKey?: string;
+  labelName?: string;
+  metricKeys?: string[];
   showRegressionLine?: boolean;
   rSquared?: number;
   regressionCoeffs?: { slope: number; intercept: number };
@@ -70,6 +82,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
   const chartDataToUse = config.chartData || data;
   const storageKey = `chart_title_${config.id}`;
   const typeKey = `chart_type_${config.id}`;
+  const insightStorageKey = `chart_insight_${config.id}`;
 
   // Chart type that can be overridden by the user (persisted)
   const SWITCHABLE: Array<ChartConfig['type']> = ['bar', 'line', 'area'];
@@ -81,6 +94,10 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
   const [activeType, setActiveType] = useState<ChartConfig['type']>(
     () => (localStorage.getItem(typeKey) as ChartConfig['type']) || config.type
   );
+  const [editableInsight, setEditableInsight] = useState(() => {
+    const savedInsight = localStorage.getItem(insightStorageKey);
+    return savedInsight !== null ? savedInsight : config.insight || '';
+  });
   const [localFormat, setLocalFormat] = useState<'compact' | 'full' | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -91,6 +108,11 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
   const handleTitleChange = (val: string) => {
     setEditableTitle(val);
     localStorage.setItem(storageKey, val);
+  };
+
+  const handleInsightChange = (val: string) => {
+    setEditableInsight(val);
+    localStorage.setItem(insightStorageKey, val);
   };
 
   const handleTypeSwitch = (type: ChartConfig['type']) => {
@@ -112,6 +134,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
   }, []);
 
   const activeFormat = localFormat || numberFormat;
+  const hasVisibleInsight = editableInsight.trim().length > 0;
 
   const yAxisFormatter = (value: number) => {
     if (activeFormat === 'compact') {
@@ -130,19 +153,59 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
     return value;
   };
 
+  const rowLabel = (row: any) => {
+    const key = config.labelKey || '__label';
+    const explicit = row?.[key] || row?.cluster_name || row?.name || row?.Name || row?.label;
+    if (explicit) return explicit;
+    const entityKey = Object.keys(row || {}).find(k => {
+      const lower = k.toLowerCase();
+      if (['cluster', 'cluster_name', '__row'].includes(lower)) return false;
+      if (typeof row[k] !== 'string') return false;
+      return ['player', 'oyuncu', 'name', 'isim', 'product', 'urun', 'team', 'club', 'customer'].some(token => lower.includes(token));
+    });
+    if (entityKey) return row[entityKey];
+    return row?.__row ? `${c.row || 'Satır'} ${row.__row}` : null;
+  };
+
+  const renderPointTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+    const row = payload[0]?.payload;
+    if (!row) return null;
+    const label = rowLabel(row);
+    const xKey = config.type === 'clustering' ? config.scatter_col_x : config.xAxisKey;
+    const yKey = config.type === 'clustering' ? config.scatter_col_y : config.series[0]?.key;
+    const extraKeys = (config.metricKeys || []).filter(key => key !== xKey && key !== yKey && row[key] !== undefined).slice(0, 6);
+    return (
+      <div className="chart-tooltip">
+        {label && <div className="chart-tooltip-title">{label}</div>}
+        {row.cluster_name && <div>{c.cluster}: <b>{row.cluster_name}</b></div>}
+        {xKey && <div>{xKey}: <b>{tooltipFormatter(row[xKey])}</b></div>}
+        {yKey && <div>{yKey}: <b>{tooltipFormatter(row[yKey])}</b></div>}
+        {extraKeys.map(key => (
+          <div key={key}>{key}: <b>{tooltipFormatter(row[key])}</b></div>
+        ))}
+      </div>
+    );
+  };
+
   const renderChart = () => {
     switch (activeType) {
 
       case 'bar': {
-        const isVertical = config.layout === 'vertical';
+        const barData = (chartDataToUse as any[]).slice(0, 5);
+        const categoryLabels = barData.map(row => String(row?.[config.xAxisKey] ?? ''));
+        const maxLabelLength = Math.max(0, ...categoryLabels.map(label => label.length));
+        const isVertical = config.layout === 'vertical' || categoryLabels.length > 8 || maxLabelLength > 14;
+        const yAxisWidth = Math.min(190, Math.max(90, maxLabelLength * 7));
+        const chartHeight = Math.min(560, Math.max(320, categoryLabels.length * 30 + 90));
         return (
-          <ResponsiveContainer width="100%" height={isVertical ? 400 : 300} debounce={50}>
-            <BarChart data={chartDataToUse} layout={isVertical ? 'vertical' : 'horizontal'} margin={{ top: 10, right: 30, left: isVertical ? 40 : -20, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={isVertical ? chartHeight : 300} debounce={50}>
+            <BarChart data={barData} layout={isVertical ? 'vertical' : 'horizontal'} margin={{ top: 10, right: 30, left: isVertical ? 4 : -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
               {isVertical ? (
                 <>
                   <XAxis type="number" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={yAxisFormatter} domain={config.isStacked ? [0, 100] : [0, 'auto']} />
-                  <YAxis type="category" dataKey={config.xAxisKey} stroke="var(--text-muted)" fontSize={11} tickLine={false} axisLine={false} width={100} tickFormatter={(val) => String(val).length > 20 ? String(val).substring(0, 18) + '...' : val} />
+                  <YAxis type="category" dataKey={config.xAxisKey} stroke="var(--text-muted)" fontSize={11} tickLine={false} axisLine={false} width={yAxisWidth} tickFormatter={(val) => String(val).length > 24 ? String(val).substring(0, 22) + '...' : val} />
                 </>
               ) : (
                 <>
@@ -154,7 +217,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
               <Legend wrapperStyle={{ fontSize: '12px' }} />
               {config.series.map((s, idx) => (
                 <Bar key={s.key} dataKey={s.key} name={s.name || s.key} fill={VIBRANT_GRADIENT[idx % VIBRANT_GRADIENT.length]} radius={isVertical ? [0, 4, 4, 0] : [4, 4, 0, 0]} barSize={config.isStacked ? undefined : 20} stackId={config.isStacked ? 'a' : undefined} isAnimationActive={false}>
-                  {!config.isStacked && config.series.length === 1 && chartDataToUse.map((_: any, index: number) => (
+                  {!config.isStacked && config.series.length === 1 && barData.map((_: any, index: number) => (
                     <Cell key={`cell-${index}`} fill={VIBRANT_GRADIENT[index % VIBRANT_GRADIENT.length]} />
                   ))}
                 </Bar>
@@ -162,8 +225,8 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
               {config.id.startsWith('hist-') && (
                 <>
                   {config.isNormal
-                    ? <ReferenceLine x={config.mean} stroke="#10b981" strokeDasharray="3 3" label={{ value: 'Mean', position: 'top', fill: '#10b981', fontSize: 10 }} />
-                    : <ReferenceLine x={config.median} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: 'Median', position: 'top', fill: '#f59e0b', fontSize: 10 }} />
+                    ? <ReferenceLine x={config.mean} stroke="#10b981" strokeDasharray="3 3" label={{ value: c.mean, position: 'top', fill: '#10b981', fontSize: 10 }} />
+                    : <ReferenceLine x={config.median} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: c.median, position: 'top', fill: '#f59e0b', fontSize: 10 }} />
                   }
                 </>
               )}
@@ -235,7 +298,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
               <XAxis type="number" dataKey={scatterXKey} name={scatterXKey} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} domain={['auto', 'auto']} />
               <YAxis type="number" dataKey={scatterYKey} name={scatterYKey} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} domain={['auto', 'auto']} />
-              <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)', borderRadius: '8px' }} />
+              <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} content={renderPointTooltip} />
               <Scatter name={config.title} data={chartDataToUse} fill="var(--accent)" shape={config.isHexbin ? <Hexagon /> : 'circle'} isAnimationActive={false} />
               {regressionData && (
                 <Line data={regressionData} type="monotone" dataKey="regression" stroke="#ef4444" strokeWidth={2} dot={false} activeDot={false} legendType="none" isAnimationActive={false} />
@@ -258,9 +321,9 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                 <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={yAxisFormatter} />
                 <RechartsTooltip contentStyle={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)', borderRadius: '8px' }} />
                 <Legend wrapperStyle={{ fontSize: '12px' }} />
-                <Line type="monotone" dataKey="actual" name="Actual" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="fitted" name="Model Fit" stroke="#93c5fd" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="forecast" name="Forecast" stroke="#10b981" strokeWidth={3} strokeDasharray="5 5" dot={{ r: 5 }} isAnimationActive={false} />
+                <Line type="monotone" dataKey="actual" name={c.legendActual || c.actual || 'Actual'} stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} isAnimationActive={false} />
+                <Line type="monotone" dataKey="fitted" name={c.legendFit || c.modelFit || 'Model Fit'} stroke="#93c5fd" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="forecast" name={c.legendForecast || c.forecast || 'Forecast'} stroke="#10b981" strokeWidth={3} strokeDasharray="5 5" dot={{ r: 5 }} isAnimationActive={false} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -314,11 +377,11 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                   return (
                     <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', lineHeight: 1.8 }}>
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>{d[config.xAxisKey] ?? d.group}</div>
-                      <div>Max: <b>{yAxisFormatter(d.max)}</b></div>
+                      <div>{c.max}: <b>{yAxisFormatter(d.max)}</b></div>
                       <div>Q3: <b>{yAxisFormatter(d.q3)}</b></div>
                       <div>{c.median}: <b>{yAxisFormatter(d.median)}</b></div>
                       <div>Q1: <b>{yAxisFormatter(d.q1)}</b></div>
-                      <div>Min: <b>{yAxisFormatter(d.min)}</b></div>
+                      <div>{c.min}: <b>{yAxisFormatter(d.min)}</b></div>
                     </div>
                   );
                 }}
@@ -329,32 +392,75 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
           </ResponsiveContainer>
         );
       }
-      case 'clustering':
+      case 'clustering': {
+        const hasTopCategories = Boolean(config.cluster_profiles?.some((profile: any) => profile.top_categories?.length));
+        const aggregationLabel = config.aggregation_label || (config.aggregation_method === 'median' ? 'Features shown as: Median values' : 'Features shown as: Average values');
+        const silhouetteText = config.silhouette_text || 'Silhouette Score: Not available.';
         return (
           <div className="clustering-container">
             <ResponsiveContainer width="100%" height={300} debounce={50}>
-              <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: -20 }}>
+              <ScatterChart margin={{ top: 20, right: 24, bottom: 48, left: 12 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
-                <XAxis type="number" dataKey={config.scatter_col_x} name={config.scatter_col_x} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} />
-                <YAxis type="number" dataKey={config.scatter_col_y} name={config.scatter_col_y} stroke="var(--text-muted)" fontSize={12} tickFormatter={yAxisFormatter} />
-                <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} />
-                <Scatter name="Clusters" data={chartDataToUse}>
+                <XAxis
+                  type="number"
+                  dataKey={config.scatter_col_x}
+                  name={config.scatter_col_x}
+                  stroke="var(--text-muted)"
+                  fontSize={12}
+                  tickFormatter={yAxisFormatter}
+                  label={{ value: config.xAxisLabel || config.scatter_col_x, position: 'insideBottom', offset: -30, fill: 'var(--text-muted)', fontSize: 11 }}
+                />
+                <YAxis
+                  type="number"
+                  dataKey={config.scatter_col_y}
+                  name={config.scatter_col_y}
+                  stroke="var(--text-muted)"
+                  fontSize={12}
+                  tickFormatter={yAxisFormatter}
+                  label={{ value: config.yAxisLabel || config.scatter_col_y, angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 11 }}
+                />
+                <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} content={renderPointTooltip} />
+                <Scatter name={c.clusters} data={chartDataToUse}>
                   {chartDataToUse.map((entry: any, index: number) => (
                     <Cell key={`cell-${index}`} fill={COLORS[parseInt(entry.cluster) % COLORS.length]} />
                   ))}
                 </Scatter>
               </ScatterChart>
             </ResponsiveContainer>
+            <div className="cluster-meta-strip">
+              <span>{aggregationLabel}</span>
+              <span className={`silhouette-quality ${String(config.silhouette_quality || '').toLowerCase()}`}>{silhouetteText}</span>
+            </div>
+            {config.projection_note && (
+              <div className="cluster-projection-note">{config.projection_note}</div>
+            )}
             {config.cluster_profiles && (
               <div className="cluster-profiles-table mt-4">
                 <table className="analysis-table mini">
-                  <thead><tr><th>Cluster</th><th>{c.clusterSize}</th><th>{c.clusterFeatures}</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>{c.clusterHeader || 'Cluster'}</th>
+                      <th>{c.clusterSize}</th>
+                      <th>{c.clusterFeatures}</th>
+                      {hasTopCategories && <th>Dominant categories</th>}
+                    </tr>
+                  </thead>
                   <tbody>
                     {config.cluster_profiles.map((profile: any) => (
                       <tr key={profile.cluster_id}>
-                        <td><span className="cluster-dot" style={{ backgroundColor: COLORS[profile.cluster_id % COLORS.length] }} /> #{profile.cluster_id}</td>
+                        <td><span className="cluster-dot" style={{ backgroundColor: COLORS[profile.cluster_id % COLORS.length] }} /> {profile.cluster_name || `#${profile.cluster_id}`}</td>
                         <td>{profile.size_pct}%</td>
                         <td className="text-xs">{Object.keys(profile).filter(k => k.endsWith('_mean')).map(k => (<div key={k}>{k.replace('_mean', '')}: {yAxisFormatter(profile[k])}</div>))}</td>
+                        {hasTopCategories && (
+                          <td className="text-xs cluster-top-categories">
+                            {profile.top_categories?.length ? profile.top_categories.map((category: any) => (
+                              <div key={category.column} className="top-category-row">
+                                <span>Top {String(category.label || category.column).toLowerCase()}:</span>
+                                <b>{category.values?.map((item: any) => item.value).slice(0, 3).join(', ')}</b>
+                              </div>
+                            )) : <span className="text-muted">-</span>}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -363,6 +469,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
             )}
           </div>
         );
+      }
       case 'table':
         return (
           <div className="correlation-table-wrapper">
@@ -388,7 +495,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
   return (
     <div className="chart-widget">
       <div className="chart-header">
-        <input className="chart-title-input" value={editableTitle} onChange={(e) => handleTitleChange(e.target.value)} title="Click to edit" />
+        <input className="chart-title-input" value={editableTitle} onChange={(e) => handleTitleChange(e.target.value)} title={c.clickToEdit || c.editTitle || 'Click to edit'} />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           {onRemove && (
@@ -442,15 +549,24 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
         {renderChart()}
       </div>
 
-      {config.insight && (
+      {hasVisibleInsight && (
         <div className="chart-footer">
           <div className="insight-top">
             <Info size={16} className="insight-icon" />
-            <p className="insight-text"><strong>{c.insight}</strong> {config.insight}</p>
+            <label className="insight-editor">
+              <span>{c.insight}</span>
+              <textarea
+                className="insight-text insight-text-input"
+                value={editableInsight}
+                onChange={(e) => handleInsightChange(e.target.value)}
+                title={c.editInsight || c.editTitle}
+                rows={2}
+              />
+            </label>
           </div>
           {(config.normalityNote || config.rSquared || config.cramersV || config.effect_size !== undefined || config.quality) && (
             <div className="stats-badges">
-              {config.normalityNote && <span className={`stat-badge ${config.isNormal ? 'normal' : 'skewed'}`}>{config.normalityNote}</span>}
+              {config.normalityNote && <span className={`stat-badge ${config.isNormal ? 'normal' : 'skewed'}`}>{config.isNormal ? (c.normalityNormal || c.normalDistribution || config.normalityNote) : (c.normalitySkewed || c.skewedDistribution || config.normalityNote)}</span>}
               {config.rSquared && <span className="stat-badge r2">R² = {config.rSquared.toFixed(3)}</span>}
               {config.cramersV && <span className="stat-badge cv">Cramér's V = {config.cramersV.toFixed(3)}</span>}
               {config.effect_size !== undefined && <span className="stat-badge">{c.effect}: {config.effect_size.toFixed(2)} {config.effect_label ? `(${config.effect_label})` : ''}</span>}

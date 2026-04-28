@@ -118,3 +118,31 @@
   flex-shrink: 0;
   margin-top: 2px;
 }
+
+.kpi-insight-input {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  line-height: 1.4;
+  padding: 2px 4px;
+}
+
+.kpi-insight-input:hover {
+  border-color: var(--border-color);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.kpi-insight-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-surface);
+  outline: none;
+}
+
+[data-theme="dark"] .kpi-insight-input:hover {
+  background: rgba(255, 255, 255, 0.08);
+}

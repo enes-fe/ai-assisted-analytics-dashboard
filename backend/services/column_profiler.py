@@ -33,8 +33,8 @@ def get_column_profile(df: pd.DataFrame, col: str) -> dict:
             if pd.api.types.is_datetime64_any_dtype(series):
                 is_datetime = True
             else:
-                test_dates = pd.to_datetime(series.dropna().head(10), errors="coerce")
-                if not test_dates.isna().all():
+                test_dates = pd.to_datetime(series.dropna().head(50), errors="coerce")
+                if len(test_dates) > 0 and test_dates.notna().mean() > 0.5:
                     is_datetime = True
         except Exception:
             pass

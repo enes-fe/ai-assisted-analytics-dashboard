@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .utils import sanitize_for_json, clean_string, is_id_column, is_tautology, format_col_name
+from .utils import sanitize_for_json, clean_string, is_id_column, is_tautology, format_col_name, select_label_column
 from .kpi_engine import should_skip_histogram
 from .column_profiler import get_column_profile
 
@@ -61,7 +61,9 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
     # ── Column type buckets ───────────────────────────────────────────────────
     num_cols = [
         c for c, p in profiles.items()
-        if p["type"] in ("continuous_numeric", "discrete_numeric") and not is_id_column(c, temp_df[c])
+        if p["type"] in ("continuous_numeric", "discrete_numeric")
+        and not is_id_column(c, temp_df[c])
+        and temp_df[c].dropna().nunique() > 2  # Exclude binary (0/1) flag columns
     ]
     cat_cols = [
         c for c, p in profiles.items()
@@ -94,11 +96,11 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
 
         normality_note = "Normal dağılım ✓" if is_normal else "Normal dağılım değil — medyan daha temsil edici"
 
-        insight = "Distribution analysis."
+        insight = "Dağılım analizi."
         if p.get("outlier_ratio", 0) > 0.05:
-            insight = f"High outlier ratio ({p['outlier_ratio']:.1%}) detected. Statistical spreads prioritized."
+            insight = f"Yüksek aykırı değer oranı ({p['outlier_ratio']:.1%}) tespit edildi. İstatistiksel yayılım ön plana çıktı."
         elif not is_normal:
-            insight = f"Significant skewness ({p['skewness']:.2f}) detected. Pattern indicates non-normal distribution."
+            insight = f"Belirgin çarpıklık ({p['skewness']:.2f}) tespit edildi. Normal olmayan dağılıma işaret ediyor."
 
         try:
             counts, bin_edges = np.histogram(series_clean, bins=15)
@@ -106,7 +108,7 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
             charts.append({
                 "id": f"hist-{col}",
                 "type": "bar",
-                "title": f"{format_col_name(col)} — Distribution Analysis",
+                "title": f"{format_col_name(col)} — Dağılım Analizi",
                 "xAxisKey": "range",
                 "series": [{"key": "count"}],
                 "insight": insight,
@@ -148,14 +150,14 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
             charts.append({
                 "id": f"pie-{col}",
                 "type": "pie",
-                "title": f"Composition: {col}",
+                "title": f"Bileşim: {col}",
                 "xAxisKey": col,
                 "series": [{"key": "count"}],
-                "insight": f"Analysis shows distribution across {len(data)} distinct segments.",
+                "insight": f"Analiz {len(data)} farklı segmentte dağılımı gösteriyor.",
                 "chartData": data.fillna(0).to_dict(orient="records"),
             })
         else:
-            actual_n = min(len(counts), 10)
+            actual_n = min(len(counts), 5)
             topN = counts.head(actual_n)
             total_cat_sum = counts.sum()
             top3_sum = topN.head(3).sum()
@@ -165,17 +167,17 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
             data.columns = [col, "count"]
 
             if top3_pct > 70:
-                insight = f"Highly concentrated: The top 3 categories dominate with {top3_pct:.1f}% of total volume."
+                insight = f"Yüksek konsantrasyon: İlk 3 kategori toplam hacmin %{top3_pct:.1f}'ini oluşturuyor."
             elif top3_pct > 40:
-                insight = f"The top 3 performers represent {top3_pct:.1f}% of the overall distribution."
+                insight = f"İlk 3 kategori toplam dağılımın %{top3_pct:.1f}'ini temsil ediyor."
             else:
-                insight = "Diverse distribution: Leading segments are shown with relatively even shares."
+                insight = "Dengeli dağılım: Öncü segmentler görece eşit paylarla görünüyor."
 
             bar_count = sum(1 for c in charts if c.get("type") == "bar")
             charts.append({
                 "id": f"bar-{col}",
                 "type": "bar",
-                "title": f"Distribution Analysis: {col}",
+                "title": f"Dağılım Analizi: {col}",
                 "xAxisKey": col,
                 "layout": "vertical" if bar_count % 2 != 0 else "horizontal",
                 "series": [{"key": "count"}],
@@ -198,17 +200,17 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
                         "Var A": c1,
                         "Var B": c2,
                         "Correlation": corr_val,
-                        "Strength": "Strong" if abs(corr_val) >= 0.5 else "Moderate" if abs(corr_val) >= 0.3 else "Weak",
+                        "Strength": "Güçlü" if abs(corr_val) >= 0.5 else "Orta" if abs(corr_val) >= 0.3 else "Zayıf",
                     })
             heatmap_data.sort(key=lambda x: abs(x["Correlation"]), reverse=True)
             if sum(1 for d in heatmap_data if abs(d["Correlation"]) >= 0.5) >= 1:
                 relational_charts.append({
                     "id": "correlation-matrix",
                     "type": "table",
-                    "title": "Variable Relationship Strength",
+                    "title": "Değişken İlişki Gücü",
                     "xAxisKey": "Var A",
                     "series": [{"key": "Correlation"}],
-                    "insight": "Ranked by Spearman correlation strength. High absolute values indicate statistical association, not causality.",
+                    "insight": "Spearman korelasyon gücüne göre sıralandı. Yüksek mutlak değerler istatistiksel ilişkiye işaret eder, nedensellik göstermez.",
                     "chartData": heatmap_data[:12],
                 })
         except Exception:
@@ -231,10 +233,10 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
                 relational_charts.append({
                     "id": f"line-{d_col}-{n_col}",
                     "type": "line",
-                    "title": f"{format_col_name(n_col)} — Trend Over Time",
+                    "title": f"{format_col_name(n_col)} — Zaman İçinde Trend",
                     "xAxisKey": d_col,
                     "series": [{"key": n_col}],
-                    "insight": f"Analysis of {n_col} fluctuations over {d_col} periods.",
+                    "insight": f"{n_col} değerinin {d_col} periyotlarındaki dalgalanma analizi.",
                     "chartData": line_data.fillna(0).to_dict(orient="records"),
                 })
             except Exception:
@@ -245,6 +247,7 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
     # ─────────────────────────────────────────────────────────────────────────
     if cat_cols and num_cols:
         try:
+            fallback_candidates: list = []
             for cat in cat_cols[:3]:
                 for num in num_cols[:4]:
                     significant = False
@@ -283,7 +286,7 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
                             relational_charts.append({
                                 "id": f"box-{cat}-{num}",
                                 "type": "boxplot",
-                                "title": f"Distribution of {format_col_name(num)} by {format_col_name(cat)}",
+                                "title": f"{format_col_name(num)} Dağılımı - {format_col_name(cat)}",
                                 "xAxisKey": "group",
                                 "series": [{"key": "median"}],
                                 "insight": summary,
@@ -293,16 +296,21 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
                                 "quality": insight_item.get("quality"),
                             })
                     else:
+                        # Limit non-significant cat×num bar charts to avoid chart explosion
+                        non_sig_count = sum(1 for c in charts if c.get("id", "").startswith("bar-") and "-" in c["id"])
+                        if non_sig_count >= 3:
+                            continue
                         try:
-                            data = df.groupby(cat)[num].mean().nlargest(10).reset_index()
+                            # Pick the num col with highest variance for this cat — most informative
+                            data = df.groupby(cat)[num].mean().nlargest(5).reset_index()
                             data.columns = [cat, num]
                             charts.append({
                                 "id": f"bar-{cat}-{num}",
                                 "type": "bar",
-                                "title": f"Average {format_col_name(num)} by {format_col_name(cat)}",
+                                "title": f"Ortalama {format_col_name(num)} — {format_col_name(cat)} Bazında",
                                 "xAxisKey": cat,
                                 "series": [{"key": num}],
-                                "insight": f"Analysis of metric variance across {cat} segments.",
+                                "insight": f"{cat} segmentlerinde metrik varyansı analizi.",
                                 "chartData": data.fillna(0).to_dict(orient="records"),
                             })
                         except Exception:
@@ -362,7 +370,7 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
         if abs(corr) >= 0.95:
             continue
 
-        strength = "strong" if abs(corr) >= 0.5 and p_val < 0.05 else "moderate" if abs(corr) >= 0.3 else "weak"
+        strength = "güçlü" if abs(corr) >= 0.5 and p_val < 0.05 else "orta" if abs(corr) >= 0.3 else "zayıf"
 
         show_regression = False
         r_squared = None
@@ -382,16 +390,24 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
                     break
 
         sample_size = min(1000, len(c_df))
-        scatter_data = c_df.sample(sample_size, random_state=42).fillna(0).to_dict(orient="records")
+        sample_df = c_df.sample(sample_size, random_state=42).copy()
+        label_col = select_label_column(temp_df, exclude={n1, n2})
+        sample_df["__row"] = sample_df.index.astype(int) + 1
+        if label_col:
+            sample_df[label_col] = temp_df.loc[sample_df.index, label_col].astype(str)
+            sample_df["__label"] = sample_df[label_col]
+        scatter_data = sample_df.fillna(0).to_dict(orient="records")
 
         relational_charts.append({
             "id": f"scatter-{n1}-{n2}",
             "type": "scatter",
-            "title": f"{format_col_name(n1)} vs {format_col_name(n2)} — Correlation",
+            "title": f"{format_col_name(n1)} ve {format_col_name(n2)} — Korelasyon",
             "xAxisKey": n1,
             "series": [{"key": n2}],
-            "insight": f"Correlation Score: {corr:.2f} ({strength} relationship). High scores indicate association strength, not causality.",
+            "insight": f"Korelasyon Skoru: {corr:.2f} ({strength} ilişki). Yüksek skor ilişki gücünü gösterir, nedensellik değil.",
             "chartData": scatter_data,
+            "labelKey": "__label" if label_col else None,
+            "labelName": label_col,
             "isHexbin": len(c_df) > 10000,
             "showRegressionLine": show_regression,
             "rSquared": r_squared,
@@ -429,7 +445,7 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
                                 relational_charts.append({
                                     "id": f"stacked-{c1}-{c2}",
                                     "type": "bar",
-                                    "title": f"Relationship: {format_col_name(c1)} and {format_col_name(c2)}",
+                                    "title": f"{format_col_name(c1)} ve {format_col_name(c2)} İlişkisi",
                                     "xAxisKey": c1,
                                     "layout": "vertical",
                                     "isStacked": True,

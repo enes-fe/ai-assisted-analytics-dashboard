@@ -181,6 +181,69 @@
   font-size: 0.75rem;
 }
 
+.text-muted {
+  color: var(--text-muted);
+}
+
+.cluster-meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 10px 0;
+}
+
+.cluster-meta-strip span {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 5px 8px;
+}
+
+.silhouette-quality.strong,
+.silhouette-quality.good {
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.silhouette-quality.moderate {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.silhouette-quality.weak {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.cluster-projection-note {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  margin: 8px 10px 0;
+}
+
+.cluster-top-categories {
+  min-width: 180px;
+}
+
+.top-category-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.top-category-row span {
+  color: var(--text-muted);
+}
+
+.top-category-row b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .chart-footer {
   padding: 14px 20px;
   background-color: rgba(0, 0, 0, 0.03);
@@ -206,6 +269,63 @@
   color: var(--text-muted);
   line-height: 1.5;
   margin: 0;
+}
+
+.insight-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.insight-editor span {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.insight-text-input {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 4px 6px;
+  font: inherit;
+  outline: none;
+}
+
+.insight-text-input:hover {
+  border-color: var(--border-color);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.insight-text-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-surface);
+}
+
+[data-theme="dark"] .insight-text-input:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chart-tooltip {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.7;
+  max-width: 260px;
+  padding: 10px 12px;
+}
+
+.chart-tooltip-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
 }
 
 .stats-badges {

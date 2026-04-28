@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowDownRight, ArrowUpRight, AlertCircle, MoreHorizontal } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, AlertCircle, MoreHorizontal, SlidersHorizontal } from 'lucide-react';
 import { useLang } from '../contexts/useLang';
 import './KPICard.css';
 
@@ -17,14 +17,20 @@ export interface KPIConfig {
 interface KPICardProps {
   config: KPIConfig;
   numberFormat?: 'compact' | 'full';
+  onConfigure?: () => void;
 }
 
-export default function KPICard({ config, numberFormat = 'compact' }: KPICardProps) {
+export default function KPICard({ config, numberFormat = 'compact', onConfigure }: KPICardProps) {
   const { title, value, trend, trendDirection, insight } = config;
   const storageKey = `kpi_title_${config.id}`;
+  const insightStorageKey = `kpi_insight_${config.id}`;
   const [editableTitle, setEditableTitle] = useState(
     () => localStorage.getItem(storageKey) || title
   );
+  const [editableInsight, setEditableInsight] = useState(() => {
+    const savedInsight = localStorage.getItem(insightStorageKey);
+    return savedInsight !== null ? savedInsight : insight || '';
+  });
   const [localFormat, setLocalFormat] = useState<'compact' | 'full' | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -36,7 +42,10 @@ export default function KPICard({ config, numberFormat = 'compact' }: KPICardPro
     localStorage.setItem(storageKey, val);
   };
 
-
+  const handleInsightChange = (val: string) => {
+    setEditableInsight(val);
+    localStorage.setItem(insightStorageKey, val);
+  };
 
   // When global format changes, reset local override
   useEffect(() => {
@@ -54,6 +63,7 @@ export default function KPICard({ config, numberFormat = 'compact' }: KPICardPro
   }, []);
 
   const activeFormat = localFormat || numberFormat;
+  const hasVisibleInsight = editableInsight.trim().length > 0;
 
   const formatValue = (val: number, format: 'compact' | 'full') => {
     if (format === 'compact') {
@@ -73,7 +83,7 @@ export default function KPICard({ config, numberFormat = 'compact' }: KPICardPro
           className="kpi-title-input"
           value={editableTitle}
           onChange={(e) => handleTitleChange(e.target.value)}
-          title="Click to edit"
+          title={t.kpi.editTitle}
         />
 
         <div className="card-actions-wrapper" ref={menuRef}>
@@ -86,6 +96,15 @@ export default function KPICard({ config, numberFormat = 'compact' }: KPICardPro
               <div className="dropdown-label">{k.format}</div>
               <button className={`dropdown-item ${activeFormat === 'compact' ? 'active' : ''}`} onClick={() => { setLocalFormat('compact'); setShowMenu(false); }}>{k.compact}</button>
               <button className={`dropdown-item ${activeFormat === 'full' ? 'active' : ''}`} onClick={() => { setLocalFormat('full'); setShowMenu(false); }}>{k.full}</button>
+              {onConfigure && (
+                <>
+                  <div className="dropdown-divider" />
+                  <button className="dropdown-item dropdown-item-icon" onClick={() => { onConfigure(); setShowMenu(false); }}>
+                    <SlidersHorizontal size={13} />
+                    {k.configureColumns || 'KPI kolonlarını yönet'}
+                  </button>
+                </>
+              )}
             </div>
 
           )}
@@ -102,10 +121,16 @@ export default function KPICard({ config, numberFormat = 'compact' }: KPICardPro
           </div>
         )}
       </div>
-      {insight && (
+      {hasVisibleInsight && (
         <div className="kpi-insight">
           <AlertCircle size={14} className="kpi-insight-icon" />
-          <span>{insight}</span>
+          <textarea
+            className="kpi-insight-input"
+            value={editableInsight}
+            onChange={(e) => handleInsightChange(e.target.value)}
+            title={k.editInsight || k.editTitle}
+            rows={2}
+          />
         </div>
       )}
     </div>
