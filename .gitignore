@@ -37,3 +37,16 @@ backend/.dataset_storage/
 *.sqlite
 *.parquet
 *.pkl
+
+# Temporary TypeScript / tooling outputs
+tsc_errors*.txt
+
+# Accidental terminal artifacts
+cls
+
+# Python cache extras
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
