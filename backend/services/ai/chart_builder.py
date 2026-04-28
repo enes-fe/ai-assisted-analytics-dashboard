@@ -5,7 +5,7 @@ from typing import Optional
 
 import pandas as pd
 
-from services.utils import format_col_name, sanitize_for_json
+from services.utils import format_col_name, sanitize_for_json, is_id_column, select_label_column
 
 from .schemas import ChartPlan, SemanticDatasetPlan
 
@@ -22,14 +22,48 @@ def _is_numeric(df: pd.DataFrame, col: Optional[str]) -> bool:
     return _valid_col(df, col) and pd.api.types.is_numeric_dtype(df[col])
 
 
+def _is_binary(df: pd.DataFrame, col: Optional[str]) -> bool:
+    """Return True if column only has 2 or fewer distinct numeric values (e.g. 0/1 flags)."""
+    if not _is_numeric(df, col):
+        return False
+    return df[col].dropna().nunique() <= 2
+
+
+def _is_id_dimension(df: pd.DataFrame, col: Optional[str]) -> bool:
+    """Return True if column is an identifier (high cardinality or ID-named)."""
+    if not _valid_col(df, col):
+        return False
+    return is_id_column(str(col), df[col])
+
+
 def _sort_and_limit(data: pd.DataFrame, value_col: str, sort: str, limit: int) -> pd.DataFrame:
     if sort in {"asc", "desc"} and value_col in data.columns:
         data = data.sort_values(value_col, ascending=(sort == "asc"))
-    return data.head(max(1, min(int(limit or 10), 30)))
+    return data.head(max(1, min(int(limit or 5), 5)))
 
 
 def _chart_id(plan: ChartPlan) -> str:
     return f"ai-{plan.chart_type}-{uuid.uuid4().hex[:8]}"
+
+
+def _chart_title(chart_type: str, value_col: Optional[str], dimension: Optional[str], second_metric: Optional[str] = None) -> str:
+    if chart_type == "scatter" and value_col and second_metric:
+        return f"{format_col_name(value_col)} ve {format_col_name(second_metric)} İlişkisi"
+    if value_col and dimension:
+        return f"{format_col_name(value_col)} - {format_col_name(dimension)}"
+    if dimension:
+        return f"Kayıt Sayısı - {format_col_name(dimension)}"
+    return "Semantik Tablo"
+
+
+def _chart_insight(chart_type: str, value_col: Optional[str], dimension: Optional[str], second_metric: Optional[str] = None) -> str:
+    if chart_type == "scatter" and value_col and second_metric:
+        return f"{format_col_name(value_col)} ile {format_col_name(second_metric)} arasındaki ilişki gösteriliyor."
+    if value_col and dimension:
+        return f"{format_col_name(value_col)} metriği {format_col_name(dimension)} kırılımında özetlendi."
+    if dimension:
+        return f"Kayıt sayısı {format_col_name(dimension)} kırılımında özetlendi."
+    return "Seçilen alanlar tablo görünümünde listelendi."
 
 
 def _records(data: pd.DataFrame) -> list[dict]:
@@ -53,18 +87,28 @@ def build_chart_from_plan(df: pd.DataFrame, plan: ChartPlan) -> Optional[dict]:
         if chart_type == "scatter":
             if not (_is_numeric(df, metric) and _is_numeric(df, second_metric)):
                 return None
-            plot_df = df[[metric, second_metric]].dropna().head(300)
+            # Binary columns (0/1 flags) make scatter plots meaningless
+            if _is_binary(df, metric) or _is_binary(df, second_metric):
+                return None
+            label_col = select_label_column(df, preferred=dimension, exclude={metric, second_metric})
+            selected_cols = [metric, second_metric] + ([label_col] if label_col else [])
+            plot_df = df[selected_cols].dropna(subset=[metric, second_metric]).head(300)
             if plot_df.empty:
                 return None
+            plot_df["__row"] = plot_df.index.astype(int) + 1
+            if label_col:
+                plot_df["__label"] = plot_df[label_col].astype(str)
             chart_data = _records(plot_df)
             return {
                 "id": _chart_id(plan),
                 "type": "scatter",
-                "title": plan.title or f"{format_col_name(metric)} vs {format_col_name(second_metric)}",
+                "title": _chart_title(chart_type, metric, None, second_metric),
                 "xAxisKey": metric,
                 "series": [{"key": second_metric}],
                 "chartData": chart_data,
-                "insight": plan.reason,
+                "labelKey": "__label" if label_col else None,
+                "labelName": format_col_name(label_col) if label_col else None,
+                "insight": _chart_insight(chart_type, metric, None, second_metric),
                 "source": "ollama_semantic_planner",
             }
 
@@ -78,15 +122,18 @@ def build_chart_from_plan(df: pd.DataFrame, plan: ChartPlan) -> Optional[dict]:
             return {
                 "id": _chart_id(plan),
                 "type": "table",
-                "title": plan.title or "Semantic Table",
+                "title": "Semantik Tablo",
                 "xAxisKey": cols[0],
                 "series": [{"key": c} for c in cols[1:]],
                 "chartData": _records(table_df),
-                "insight": plan.reason,
+                "insight": _chart_insight(chart_type, None, cols[0]),
                 "source": "ollama_semantic_planner",
             }
 
         if not _valid_col(df, dimension):
+            return None
+        # Skip charts where dimension is an identifier (e.g. Operation_Id, Player_Id)
+        if _is_id_dimension(df, dimension):
             return None
 
         selected_cols = [c for c in [dimension, metric, second_metric] if _valid_col(df, c)]
@@ -120,10 +167,12 @@ def build_chart_from_plan(df: pd.DataFrame, plan: ChartPlan) -> Optional[dict]:
             grouped = _sort_and_limit(grouped, value_col, plan.sort, plan.limit)
 
         chart_data = _records(grouped)
+        # Derive title from actual columns, not the LLM plan (avoids title/data mismatch bugs)
+        auto_title = f"{format_col_name(value_col)} — {format_col_name(dimension)} Analizi"
         return {
             "id": _chart_id(plan),
             "type": chart_type,
-            "title": plan.title or f"{format_col_name(value_col)} by {format_col_name(dimension)}",
+            "title": auto_title,
             "xAxisKey": dimension,
             "series": [{"key": key} for key in series_keys],
             "chartData": chart_data,

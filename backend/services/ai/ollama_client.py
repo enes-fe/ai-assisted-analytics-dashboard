@@ -10,8 +10,19 @@ from pydantic import BaseModel
 from .schemas import model_json_schema_compat, model_validate_compat
 
 
+def _get_timeout(env_var: str, default: int) -> int:
+    """Read a timeout value (seconds) from an environment variable."""
+    try:
+        return max(1, int(os.getenv(env_var, str(default))))
+    except (ValueError, TypeError):
+        return default
+
+
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b")
+
+# Context window size — smaller = faster inference. 2048 is sufficient for structured JSON plans.
+OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "2048"))
 
 
 def get_ollama_client():
@@ -42,15 +53,17 @@ def _loads_json(content: str) -> Any:
         raise
 
 
-async def _chat(messages: list[dict], schema: dict, temperature: float, timeout: int):
+async def _chat(messages: list[dict], schema: dict, temperature: float, timeout: float):
     client = get_ollama_client()
     model = os.getenv("OLLAMA_MODEL", OLLAMA_MODEL)
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", str(OLLAMA_NUM_CTX)))
     return await asyncio.wait_for(
         client.chat(
             model=model,
             messages=messages,
             format=schema,
-            options={"temperature": temperature},
+            options={"temperature": temperature, "num_ctx": num_ctx},
+            keep_alive=-1,  # Keep model loaded in memory — prevents cold-start latency
         ),
         timeout=timeout,
     )
@@ -60,29 +73,21 @@ async def call_ollama_structured(
     messages: list[dict],
     schema_model: type[BaseModel],
     temperature: float = 0,
-    timeout: int = 120,
+    timeout: int | None = None,
+    timeout_env: str = "AI_SEMANTIC_TIMEOUT_SECONDS",
+    timeout_default: int = 20,
 ) -> BaseModel:
+    """Call Ollama with structured output.
+
+    Timeout priority: explicit ``timeout`` arg > env var ``timeout_env`` > ``timeout_default``.
+    """
+    resolved_timeout = timeout if timeout is not None else _get_timeout(timeout_env, timeout_default)
     schema = model_json_schema_compat(schema_model)
     try:
-        response = await _chat(messages, schema, temperature, timeout)
+        response = await _chat(messages, schema, temperature, resolved_timeout)
         data = _loads_json(_extract_content(response))
         return model_validate_compat(schema_model, data)
     except Exception as first_error:
-        repair_messages = messages + [
-            {
-                "role": "user",
-                "content": (
-                    "Your previous response was invalid for the required JSON schema. "
-                    "Return only valid JSON. Do not include markdown or commentary."
-                ),
-            }
-        ]
-        try:
-            response = await _chat(repair_messages, schema, 0, timeout)
-            data = _loads_json(_extract_content(response))
-            return model_validate_compat(schema_model, data)
-        except Exception as second_error:
-            raise RuntimeError(
-                f"Ollama structured output failed: {first_error}; repair failed: {second_error}"
-            ) from second_error
-
+        raise RuntimeError(
+            f"Ollama structured output failed: {first_error}"
+        ) from first_error

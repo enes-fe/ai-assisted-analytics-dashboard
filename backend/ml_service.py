@@ -60,6 +60,7 @@ from services.ml_engine import (
     run_clustering,
     detect_cluster_domain,
 )
+from services.forecast_utils import getForecastDirection, get_forecast_direction
 
 # ── NLP query parser ─────────────────────────────────────────────────────────
 from services.query_parser import simulate_rearchitecting
@@ -81,6 +82,7 @@ __all__ = [
     "human_readable_chi_square", "priority_score", "group_by_category",
     # ml_engine
     "run_forecasting", "run_clustering", "detect_cluster_domain",
+    "getForecastDirection", "get_forecast_direction",
     # query_parser
     "simulate_rearchitecting",
 ]

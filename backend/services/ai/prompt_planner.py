@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from typing import Optional
 
 import pandas as pd
 
+from services.utils import select_label_column
+
 from .column_cards import build_column_cards
-from .ollama_client import call_ollama_structured
-from .schemas import ChartPlan, PromptChartIntent, SemanticDatasetPlan, model_dump_compat
+from .groq_client import call_groq_structured
+from .schemas import ChartPlan, FastSemanticPlan, PromptChartIntent, model_dump_compat
 
 
 def _env_int(name: str, default: int) -> int:
@@ -19,16 +22,19 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-SYSTEM_PROMPT = """You convert a user's chart request into one structured chart plan.
-Use only existing column names exactly as provided.
+SYSTEM_PROMPT = """\
+You convert a user's chart request into one structured chart plan.
+Use ONLY existing column names exactly as provided.
 Prefer columns classified as primary_metric, primary_entity, dimension, and time.
+If the user says expected goals/xG, prefer the exact expected-goals/xG column over columns that merely contain goal.
 If the user says gol/asist/goals/assists, prefer goal and assist columns plus player/team columns when available.
-The LLM must not calculate metrics or chart data. It only selects columns, chart type, aggregation, sort, and limit.
+The LLM must NOT calculate metrics or chart data; it only selects columns, chart type, aggregation, sort, and limit.
 For bar, line, area, and pie charts, set dimension to an exact column name.
 For sum, mean, min, and max aggregations, set metric to an exact numeric column name.
 For count aggregation, set dimension to an exact column name and metric may be null.
-For scatter charts, set metric and second_metric to exact numeric column names.
-Return only valid JSON matching the schema."""
+For scatter charts, set metric and second_metric to exact numeric column names; dimension may be a label column.
+Return ONLY valid JSON matching the schema.\
+"""
 
 
 def _plan_issues(plan: ChartPlan, df: pd.DataFrame) -> list[str]:
@@ -78,51 +84,164 @@ def _same_plan_shape(left: ChartPlan, right: ChartPlan) -> bool:
     )
 
 
-def _norm(value: str) -> str:
-    return re.sub(r"[^a-z0-9ığüşöçİĞÜŞÖÇ]+", "", str(value).lower())
+def _ascii(value: str) -> str:
+    value = unicodedata.normalize("NFKD", str(value))
+    return "".join(ch for ch in value if not unicodedata.combining(ch))
 
 
-def _find_column(df: pd.DataFrame, keywords: list[str], numeric: bool | None = None) -> str | None:
+def _words(value: str) -> list[str]:
+    value = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(value))
+    value = _ascii(value).lower()
+    return [part for part in re.split(r"[^a-z0-9]+", value) if part]
+
+
+def _compact(value: str) -> str:
+    return "".join(_words(value))
+
+
+def _prompt_has(prompt: str, aliases: list[str]) -> bool:
+    prompt_words = set(_words(prompt))
+    prompt_compact = _compact(prompt)
+    for alias in aliases:
+        alias_words = _words(alias)
+        alias_compact = "".join(alias_words)
+        if alias_compact and alias_compact in prompt_compact:
+            return True
+        if alias_words and set(alias_words).issubset(prompt_words):
+            return True
+    return False
+
+
+def _find_best_column(
+    df: pd.DataFrame,
+    prompt: str,
+    aliases: list[str],
+    numeric: bool | None = None,
+) -> str | None:
+    prompt_words = set(_words(prompt))
+    asks_expected = "expected" in prompt_words or "xg" in prompt_words
+    scored: list[tuple[int, str]] = []
+
     for col in df.columns:
-        normalized = _norm(str(col))
-        if not any(_norm(keyword) in normalized for keyword in keywords):
-            continue
+        col_name = str(col)
         if numeric is True and not pd.api.types.is_numeric_dtype(df[col]):
             continue
         if numeric is False and pd.api.types.is_numeric_dtype(df[col]):
             continue
-        return str(col)
+
+        col_words = set(_words(col_name))
+        col_compact = _compact(col_name)
+        score = len(prompt_words & col_words) * 8
+
+        for alias in aliases:
+            alias_words = set(_words(alias))
+            alias_compact = "".join(_words(alias))
+            if not alias_compact:
+                continue
+            if alias_compact == col_compact:
+                score += 130
+            elif alias_compact in col_compact:
+                score += 90 if len(alias_words) > 1 else 45
+            if alias_words and alias_words.issubset(col_words):
+                score += 110
+
+        if asks_expected and not ({"expected", "xg", "exp"} & col_words or "xg" in col_compact):
+            score -= 80
+        if "error" in col_words and "error" not in prompt_words:
+            score -= 35
+        if "lead" in col_words and "lead" not in prompt_words:
+            score -= 20
+        if "id" in col_words or col_compact.endswith("id"):
+            score -= 25
+
+        if score > 0:
+            scored.append((score, col_name))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return scored[0][1]
+
+
+def _first_numeric_not(df: pd.DataFrame, excluded: set[str]) -> str | None:
+    for col in df.columns:
+        col_name = str(col)
+        if col_name in excluded:
+            continue
+        if pd.api.types.is_numeric_dtype(df[col]) and df[col].dropna().nunique() > 2:
+            return col_name
     return None
 
 
-def _local_prompt_plan(df: pd.DataFrame, prompt: str) -> ChartPlan:
-    text = _norm(prompt)
-    player = _find_column(df, ["player", "oyuncu"], numeric=False)
-    team = _find_column(df, ["team", "takım", "takim", "club"], numeric=False)
-    goals = _find_column(df, ["goals", "goal", "gol"], numeric=True)
-    assists = _find_column(df, ["assists", "assist", "asist"], numeric=True)
-    sales = _find_column(df, ["sales", "revenue", "satis", "satış"], numeric=True)
-    profit = _find_column(df, ["profit", "kar"], numeric=True)
-    product = _find_column(df, ["product", "ürün", "urun"], numeric=False)
-    region = _find_column(df, ["region", "bolge", "bölge"], numeric=False)
+def _metric_from_prompt(df: pd.DataFrame, prompt: str) -> tuple[str | None, str]:
+    metric_groups = [
+        (["expected goals", "expected goal", "xg", "exp goals"], "mean"),
+        (["assists", "assist", "asist"], "sum"),
+        (["goals", "goal", "gol"], "sum"),
+        (["rating", "score", "puan"], "mean"),
+        (["sales", "revenue", "satis", "satış"], "sum"),
+        (["profit", "kar"], "sum"),
+        (["quantity", "qty", "adet"], "sum"),
+        (["price", "amount", "cost", "tutar", "maliyet"], "mean"),
+    ]
+    for aliases, aggregation in metric_groups:
+        if _prompt_has(prompt, aliases):
+            match = _find_best_column(df, prompt, aliases, numeric=True)
+            if match:
+                return match, aggregation
+    return None, "sum"
 
-    wants_relation = any(k in text for k in ["iliski", "ilişki", "korelasyon", "correlation", "scatter", "vs", "arasındaki", "arasindaki", "aras", "ciz", "çiz"])
-    wants_team = any(k in text for k in ["team", "takim", "takım", "tak"])
-    wants_player = any(k in text for k in ["player", "oyuncu"])
-    wants_assist = any(k in text for k in ["assist", "asist"])
-    wants_goal = any(k in text for k in ["goal", "goals", "gol"])
-    wants_sales = any(k in text for k in ["sales", "satis", "satış", "revenue"])
-    wants_profit = "profit" in text or "kar" in text
+
+def _dimension_from_prompt(df: pd.DataFrame, prompt: str) -> str | None:
+    dimension_groups = [
+        ["player name", "player", "oyuncu"],
+        ["team", "club", "takim", "takım"],
+        ["product name", "product", "urun", "ürün"],
+        ["customer name", "customer", "musteri", "müşteri"],
+        ["region", "bolge", "bölge"],
+        ["category", "kategori"],
+        ["department", "departman"],
+        ["name", "isim", "ad"],
+    ]
+    for aliases in dimension_groups:
+        if _prompt_has(prompt, aliases):
+            match = _find_best_column(df, prompt, aliases, numeric=False)
+            if match:
+                return match
+    return select_label_column(df)
+
+
+def _local_prompt_plan(df: pd.DataFrame, prompt: str) -> ChartPlan:
+    text = _compact(prompt)
+    prompt_words = set(_words(prompt))
+    metric, aggregation = _metric_from_prompt(df, prompt)
+    dimension = _dimension_from_prompt(df, prompt)
+
+    wants_relation = (
+        _prompt_has(prompt, ["correlation", "korelasyon", "relationship", "iliski", "ilişki", "scatter"])
+        or "vs" in prompt_words
+        or "versus" in prompt_words
+        or "arasindaki" in text
+    )
 
     if wants_relation:
-        first = goals if wants_goal else sales
-        second = assists if wants_assist or first == goals else profit
-        if first and second:
+        first = metric
+        second = None
+        if _prompt_has(prompt, ["assist", "assists", "asist"]):
+            second = _find_best_column(df, prompt, ["assists", "assist", "asist"], numeric=True)
+        elif _prompt_has(prompt, ["profit", "kar"]):
+            second = _find_best_column(df, prompt, ["profit", "kar"], numeric=True)
+        elif _prompt_has(prompt, ["goals", "goal", "gol"]):
+            second = _find_best_column(df, prompt, ["goals", "goal", "gol"], numeric=True)
+        if first and (not second or second == first):
+            second = _first_numeric_not(df, {first})
+        if first and second and first != second:
             return ChartPlan(
                 chart_type="scatter",
                 title=f"{first} vs {second}",
                 metric=first,
                 second_metric=second,
+                dimension=dimension,
                 aggregation="mean",
                 sort="none",
                 limit=30,
@@ -130,47 +249,33 @@ def _local_prompt_plan(df: pd.DataFrame, prompt: str) -> ChartPlan:
                 priority=5,
             )
 
-    if wants_goal and goals:
-        dimension = team if wants_team else player if (wants_player or player) else team
-        second_metric = assists if wants_assist else None
-        if dimension:
-            return ChartPlan(
-                chart_type="bar",
-                title=f"{goals}" + (f" and {assists}" if second_metric else "") + f" by {dimension}",
-                metric=goals,
-                second_metric=second_metric,
-                dimension=dimension,
-                aggregation="sum",
-                sort="desc",
-                limit=10,
-                reason="Prompt asks for football scoring metrics by entity.",
-                priority=5,
-            )
-
-    if wants_sales and sales:
-        dimension = region or product
-        if dimension:
-            return ChartPlan(
-                chart_type="bar",
-                title=f"{sales} by {dimension}",
-                metric=sales,
-                second_metric=profit if wants_profit and profit else None,
-                dimension=dimension,
-                aggregation="sum",
-                sort="desc",
-                limit=10,
-                reason="Prompt asks for sales performance by a business dimension.",
-                priority=5,
-            )
-
-    numeric_cols = [str(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    cat_cols = [str(c) for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
-    if cat_cols and numeric_cols:
+    if metric and dimension:
+        second_metric = None
+        if _prompt_has(prompt, ["assist", "assists", "asist"]):
+            assist_col = _find_best_column(df, prompt, ["assists", "assist", "asist"], numeric=True)
+            if assist_col and assist_col != metric:
+                second_metric = assist_col
         return ChartPlan(
             chart_type="bar",
-            title=f"{numeric_cols[0]} by {cat_cols[0]}",
+            title=f"{metric}" + (f" and {second_metric}" if second_metric else "") + f" by {dimension}",
+            metric=metric,
+            second_metric=second_metric,
+            dimension=dimension,
+            aggregation=aggregation,
+            sort="desc",
+            limit=5,
+            reason="Prompt metric and grouping were matched against existing dataset columns.",
+            priority=5,
+        )
+
+    numeric_cols = [str(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    label_col = select_label_column(df)
+    if label_col and numeric_cols:
+        return ChartPlan(
+            chart_type="bar",
+            title=f"{numeric_cols[0]} by {label_col}",
             metric=numeric_cols[0],
-            dimension=cat_cols[0],
+            dimension=label_col,
             aggregation="mean",
             sort="desc",
             limit=10,
@@ -183,10 +288,24 @@ def _local_prompt_plan(df: pd.DataFrame, prompt: str) -> ChartPlan:
 async def generate_prompt_chart_plan(
     df: pd.DataFrame,
     prompt: str,
-    semantic_plan: Optional[SemanticDatasetPlan],
+    semantic_plan: Optional[FastSemanticPlan | object],
 ) -> ChartPlan:
-    cards = build_column_cards(df, max_cols=_env_int("AI_MAX_COLUMN_CARDS", 60))
-    semantic_payload = model_dump_compat(semantic_plan) if semantic_plan else None
+    """Use Groq to convert a natural language prompt into a chart plan.
+
+    Falls back to local keyword-based planner if Groq fails or returns invalid columns.
+    """
+    cards = build_column_cards(df, max_cols=_env_int("AI_MAX_COLUMN_CARDS", 25))
+    semantic_payload: dict | None = None
+    if semantic_plan is not None:
+        try:
+            if hasattr(semantic_plan, "model_dump"):
+                semantic_payload = semantic_plan.model_dump()
+            elif hasattr(semantic_plan, "dict"):
+                semantic_payload = semantic_plan.dict()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    timeout = _env_int("AI_CHAT_TIMEOUT_SECONDS", 8)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -202,40 +321,30 @@ async def generate_prompt_chart_plan(
             ),
         },
     ]
-    intent = await call_ollama_structured(messages, PromptChartIntent)
-    plan = _to_chart_plan(intent)
-    issues = _plan_issues(plan, df)
-    local_plan: ChartPlan | None = None
-    try:
-        local_plan = _local_prompt_plan(df, prompt)
-    except Exception:
-        local_plan = None
-    if not issues:
-        if local_plan and local_plan.priority >= 5 and not _same_plan_shape(plan, local_plan):
-            return local_plan
-        return plan
 
-    repair_messages = messages + [
-        {
-            "role": "assistant",
-            "content": json.dumps(model_dump_compat(intent), ensure_ascii=False),
-        },
-        {
-            "role": "user",
-            "content": (
-                "The JSON was syntactically valid but semantically invalid. "
-                "Fix these issues and return one complete JSON intent again. "
-                f"Existing columns are: {list(map(str, df.columns.tolist()))}. "
-                f"Issues: {issues}"
-            ),
-        },
-    ]
-    repaired_intent = await call_ollama_structured(repair_messages, PromptChartIntent)
-    repaired_plan = _to_chart_plan(repaired_intent)
-    if _plan_issues(repaired_plan, df):
+    try:
+        intent = await call_groq_structured(
+            messages,
+            PromptChartIntent,
+            timeout_seconds=timeout,
+        )
+        plan = _to_chart_plan(intent)
+        issues = _plan_issues(plan, df)
+        local_plan: ChartPlan | None = None
+        try:
+            local_plan = _local_prompt_plan(df, prompt)
+        except Exception:
+            local_plan = None
+
+        if not issues:
+            if local_plan and local_plan.priority >= 5 and not _same_plan_shape(plan, local_plan):
+                return local_plan
+            return plan
+
         if local_plan:
             return local_plan
         return _local_prompt_plan(df, prompt)
-    if local_plan and local_plan.priority >= 5 and not _same_plan_shape(repaired_plan, local_plan):
-        return local_plan
-    return repaired_plan
+
+    except Exception:
+        # Groq unavailable or failed; use local planner.
+        return _local_prompt_plan(df, prompt)

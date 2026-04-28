@@ -54,8 +54,8 @@ def _hints_for_column(name: str) -> list[str]:
     return hints
 
 
-def build_column_cards(df: pd.DataFrame, max_cols: int = 60) -> list[dict]:
-    """Build compact column summaries for the LLM without exposing full rows."""
+def build_column_cards(df: pd.DataFrame, max_cols: int = 25) -> list[dict]:
+    """Build compact column summaries for the LLM — max 3 sample values, no full rows."""
     cards: list[dict] = []
     if df.empty:
         return cards
@@ -68,7 +68,7 @@ def build_column_cards(df: pd.DataFrame, max_cols: int = 60) -> list[dict]:
             "dtype": str(series.dtype),
             "missing_ratio": round(float(series.isna().mean()), 4),
             "unique_count": int(series.nunique(dropna=True)),
-            "sample_values": [_clean_scalar(v) for v in non_null.head(5).tolist()],
+            "sample_values": [_clean_scalar(v) for v in non_null.head(3).tolist()],
             "possible_semantic_hints": _hints_for_column(str(col)),
         }
 
@@ -82,7 +82,7 @@ def build_column_cards(df: pd.DataFrame, max_cols: int = 60) -> list[dict]:
                     "median": _clean_scalar(numeric.median()),
                 }
         else:
-            counts = non_null.astype(str).value_counts().head(5)
+            counts = non_null.astype(str).value_counts().head(3)
             card["top_values"] = [
                 {"value": str(value)[:80], "count": int(count)}
                 for value, count in counts.items()
@@ -91,4 +91,3 @@ def build_column_cards(df: pd.DataFrame, max_cols: int = 60) -> list[dict]:
         cards.append(card)
 
     return cards
-

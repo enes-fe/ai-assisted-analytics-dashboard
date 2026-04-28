@@ -1,9 +1,26 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+
+# ── Compact fast semantic plan (replaces verbose SemanticDatasetPlan) ────────
+
+class FastSemanticPlan(BaseModel):
+    detected_domain: str
+    primary_entity: Optional[str] = None
+    primary_metrics: List[str] = Field(default_factory=list)
+    secondary_metrics: List[str] = Field(default_factory=list)
+    dimensions: List[str] = Field(default_factory=list)
+    time_columns: List[str] = Field(default_factory=list)
+    ignored_columns: List[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+# ── Legacy verbose schema — kept for backward compat with /api/analytics/core ─
+
+from typing import Literal
 
 ColumnRole = Literal[
     "primary_entity",
@@ -65,19 +82,21 @@ class PromptChartIntent(ChartPlan):
     understood_request: str
 
 
+# ── Utility helpers ──────────────────────────────────────────────────────────
+
 def model_dump_compat(model: BaseModel) -> dict:
     if hasattr(model, "model_dump"):
         return model.model_dump()
-    return model.dict()
+    return model.dict()  # type: ignore[attr-defined]
 
 
 def model_validate_compat(schema_model: type[BaseModel], data: object) -> BaseModel:
     if hasattr(schema_model, "model_validate"):
         return schema_model.model_validate(data)
-    return schema_model.parse_obj(data)
+    return schema_model.parse_obj(data)  # type: ignore[attr-defined]
 
 
 def model_json_schema_compat(schema_model: type[BaseModel]) -> dict:
     if hasattr(schema_model, "model_json_schema"):
         return schema_model.model_json_schema()
-    return schema_model.schema()
+    return schema_model.schema()  # type: ignore[attr-defined]
