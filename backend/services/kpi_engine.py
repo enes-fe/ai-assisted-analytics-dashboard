@@ -88,7 +88,22 @@ def should_skip_histogram(col_name: str, profile: dict) -> bool:
 
 # ─── Main function ────────────────────────────────────────────────────────────
 
-def calculate_kpis(df: pd.DataFrame) -> list:
+def _kpi_id_for_column(col_name: str, used_ids: set[str]) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", str(col_name).strip()).strip("-").lower()
+    base_id = f"kpi-{slug or 'metric'}"
+    if base_id not in used_ids:
+        used_ids.add(base_id)
+        return base_id
+
+    suffix = 2
+    while f"{base_id}-{suffix}" in used_ids:
+        suffix += 1
+    kpi_id = f"{base_id}-{suffix}"
+    used_ids.add(kpi_id)
+    return kpi_id
+
+
+def calculate_kpis(df: pd.DataFrame, selected_columns: list[str] | None = None) -> list:
     """
     Selects up to 4 business-relevant numeric columns and computes:
       - Aggregated value (sum for totals, mean for percentages)
@@ -113,6 +128,8 @@ def calculate_kpis(df: pd.DataFrame) -> list:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
             date_col = col
             break
+        if pd.api.types.is_numeric_dtype(df[col]):
+            continue
         try:
             test = pd.to_datetime(df[col].dropna().head(5), errors="coerce")
             if not test.isna().all():
@@ -122,16 +139,24 @@ def calculate_kpis(df: pd.DataFrame) -> list:
             continue
 
     # ── Filter meaningless columns ────────────────────────────────────────────────
-    num_cols = [
-        c for c in num_cols
-        if not is_meaningless_total(c)
-        and not is_id_column(c, df[c])
-        and domain_priority(c) >= 0  # Exclude error/fault/penalty columns
-        and df[c].dropna().nunique() > 2  # Exclude binary (0/1) columns
-    ]
-    if not num_cols:
-        # Relax binary filter only as last resort
-        num_cols = [c for c in df.select_dtypes(include=[np.number]).columns.tolist() if not is_id_column(c, df[c])]
+    requested_cols = [
+        c for c in (selected_columns or [])
+        if c in df.columns and pd.api.types.is_numeric_dtype(df[c])
+    ][:4]
+
+    if requested_cols:
+        num_cols = requested_cols
+    else:
+        num_cols = [
+            c for c in num_cols
+            if not is_meaningless_total(c)
+            and not is_id_column(c, df[c])
+            and domain_priority(c) >= 0  # Exclude error/fault/penalty columns
+            and df[c].dropna().nunique() > 2  # Exclude binary (0/1) columns
+        ]
+        if not num_cols:
+            # Relax binary filter only as last resort
+            num_cols = [c for c in df.select_dtypes(include=[np.number]).columns.tolist() if not is_id_column(c, df[c])]
 
     # ── Prioritise domain-relevant columns ──────────────────────────────────────────
     num_cols_sorted = sorted(num_cols, key=lambda c: domain_priority(c), reverse=True)
@@ -145,21 +170,25 @@ def calculate_kpis(df: pd.DataFrame) -> list:
         except Exception:
             pass
 
-    # Domain-priority columns first; fill remaining slots with centrality selection
-    priority_cols = [c for c in num_cols_sorted if domain_priority(c) >= 1][:4]
-    if len(priority_cols) < 4:
-        remaining = [c for c in num_cols_sorted if c not in priority_cols]
-        extra = get_central_cols(df, remaining, top_n=4 - len(priority_cols)) if remaining else []
-        top_cols = priority_cols + extra
+    if requested_cols:
+        top_cols = requested_cols
     else:
-        top_cols = priority_cols
+        # Domain-priority columns first; fill remaining slots with centrality selection
+        priority_cols = [c for c in num_cols_sorted if domain_priority(c) >= 1][:4]
+        if len(priority_cols) < 4:
+            remaining = [c for c in num_cols_sorted if c not in priority_cols]
+            extra = get_central_cols(df, remaining, top_n=4 - len(priority_cols)) if remaining else []
+            top_cols = priority_cols + extra
+        else:
+            top_cols = priority_cols
 
     kpis: list = []
+    used_kpi_ids: set[str] = set()
 
     for i, col in enumerate(top_cols):
         if col == date_col and pd.api.types.is_datetime64_any_dtype(work_df[col]):
             continue
-        if is_meaningless_total(col):
+        if not requested_cols and is_meaningless_total(col):
             continue
 
         series = work_df[col].dropna()
@@ -222,7 +251,7 @@ def calculate_kpis(df: pd.DataFrame) -> list:
                 insight = f"Dönem içi {direction_text} trendi: {trend_str}."
 
             kpis.append({
-                "id": f"kpi-{i}",
+                "id": _kpi_id_for_column(col, used_kpi_ids),
                 "title": f"{title_prefix} {format_col_name(col)}",
                 "value": formatted_val,
                 "rawValue": value,

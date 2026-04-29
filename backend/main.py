@@ -506,7 +506,7 @@ async def calculate_custom_kpis(dataset_id: int, req: KpiColumnsRequest):
         raise HTTPException(status_code=400, detail="No valid numeric columns found")
     from services.kpi_engine import calculate_kpis
     filtered_df = df[[c for c in df.columns if c not in df.select_dtypes(include=[np.number]).columns or c in valid]]
-    kpis = calculate_kpis(filtered_df)
+    kpis = calculate_kpis(filtered_df, selected_columns=valid)
     return {"kpis": kpis}
 
 
