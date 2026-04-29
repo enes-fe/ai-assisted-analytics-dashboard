@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { MoreHorizontal, Info, AlertTriangle, ShieldAlert, X } from 'lucide-react';
 import { useLang } from '../contexts/useLang';
+import { compactLabel, formatNumber, formatPercent } from '../utils/numberFormat';
 import './ChartWidget.css';
 
 const Hexagon = (props: any) => {
@@ -104,8 +105,21 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
   const [localFormat, setLocalFormat] = useState<'compact' | 'full' | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const c = t.chart;
+  const locale = lang === 'tr' ? 'tr-TR' : 'en-US';
+
+  const isLowValueInsight = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return true;
+    return [
+      /selected by groq semantic planner/i,
+      /^aggregation:/i,
+      /^dagilim ozeti\.?$/i,
+      /metriği .* gösterilmektedir/i,
+      /metriği .* olarak gösterilmektedir/i,
+    ].some(pattern => pattern.test(trimmed));
+  };
 
   // Persist title to localStorage on change
   const handleTitleChange = (val: string) => {
@@ -138,24 +152,13 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
   }, []);
 
   const activeFormat = localFormat || numberFormat;
-  const hasVisibleInsight = editableInsight.trim().length > 0;
+  const hasVisibleInsight = editableInsight.trim().length > 0 && !(exportMode && isLowValueInsight(editableInsight));
 
-  const yAxisFormatter = (value: number) => {
-    if (activeFormat === 'compact') {
-      return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
-    }
-    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(value);
-  };
+  const formatChartValue = (value: unknown, maxDigits = 2) =>
+    formatNumber(value, { mode: activeFormat, locale, maximumFractionDigits: maxDigits });
 
-  const tooltipFormatter = (value: any) => {
-    if (typeof value === 'number') {
-      if (activeFormat === 'compact') {
-        return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(value);
-      }
-      return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
-    }
-    return value;
-  };
+  const yAxisFormatter = (value: number) => formatChartValue(value, 1);
+  const tooltipFormatter = (value: unknown, name?: unknown) => [formatChartValue(value), String(name ?? '')];
 
   const rowLabel = (row: any) => {
     const key = config.labelKey || '__label';
@@ -183,10 +186,10 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
       <div className="chart-tooltip">
         {label && <div className="chart-tooltip-title">{label}</div>}
         {row.cluster_name && <div>{c.cluster}: <b>{row.cluster_name}</b></div>}
-        {xKey && <div>{xKey}: <b>{tooltipFormatter(row[xKey])}</b></div>}
-        {yKey && <div>{yKey}: <b>{tooltipFormatter(row[yKey])}</b></div>}
+        {xKey && <div>{xKey}: <b>{formatChartValue(row[xKey])}</b></div>}
+        {yKey && <div>{yKey}: <b>{formatChartValue(row[yKey])}</b></div>}
         {extraKeys.map(key => (
-          <div key={key}>{key}: <b>{tooltipFormatter(row[key])}</b></div>
+          <div key={key}>{key}: <b>{formatChartValue(row[key])}</b></div>
         ))}
       </div>
     );
@@ -249,7 +252,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
               <div className="scatter-nearby-name">{rowLabel(item) || `${c.row || 'Row'} ${item.__row || index + 1}`}</div>
               <div className="scatter-nearby-values">
                 {keys.slice(0, 5).map(key => (
-                  item[key] !== undefined ? <span key={key}>{key}: <b>{tooltipFormatter(item[key])}</b></span> : null
+                  item[key] !== undefined ? <span key={key}>{key}: <b>{formatChartValue(item[key])}</b></span> : null
                 ))}
               </div>
             </div>
@@ -337,14 +340,40 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
         );
       case 'pie':
       case 'donut': {
-        const pieDataKey = config.series[0]?.key;
+        const pieDataKey = config.series[0]?.key || 'value';
+        const pieRows = Array.isArray(chartDataToUse) ? chartDataToUse as any[] : [];
+        const pieTotal = pieRows.reduce((sum, row) => sum + (Number(row?.[pieDataKey]) || 0), 0);
+        const piePercent = (row: any) => {
+          const value = Number(row?.[pieDataKey]) || 0;
+          return pieTotal > 0 ? value / pieTotal : 0;
+        };
+        const renderPieLabel = (props: any) => {
+          const row = props?.payload || {};
+          const label = compactLabel(row?.[config.xAxisKey] ?? props?.name, exportMode ? 16 : 18);
+          const percent = typeof props?.percent === 'number' ? props.percent : piePercent(row);
+          return `${label} - ${formatPercent(percent, { locale, input: 'ratio', maximumFractionDigits: 1 })}`;
+        };
+        const renderPieTooltip = ({ active, payload }: any) => {
+          if (!active || !payload?.length) return null;
+          const item = payload[0];
+          const row = item?.payload || {};
+          const label = row?.[config.xAxisKey] ?? item?.name;
+          const value = row?.[pieDataKey];
+          return (
+            <div className="chart-tooltip">
+              <div className="chart-tooltip-title">{label}</div>
+              <div><b>{formatChartValue(value)}</b> {pieDataKey}</div>
+              <div>{formatPercent(piePercent(row), { locale, input: 'ratio', maximumFractionDigits: 1 })}</div>
+            </div>
+          );
+        };
         return (
           <ResponsiveContainer width="100%" height={300} debounce={50}>
             <PieChart>
-              <RechartsTooltip formatter={tooltipFormatter} contentStyle={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)', color: 'var(--text-primary)', borderRadius: '8px', boxShadow: 'var(--shadow-md)' }} />
-              <Legend wrapperStyle={{ fontSize: '12px' }} />
-              <Pie data={chartDataToUse} dataKey={pieDataKey} nameKey={config.xAxisKey} cx="50%" cy="50%" innerRadius={activeType === 'donut' ? 48 : 0} outerRadius={100} fill="#8884d8" label isAnimationActive={false}>
-                {chartDataToUse.map((_: any, index: number) => (
+              <RechartsTooltip content={renderPieTooltip} />
+              <Legend wrapperStyle={{ fontSize: '12px' }} formatter={(value) => compactLabel(value, 22)} />
+              <Pie data={pieRows} dataKey={pieDataKey} nameKey={config.xAxisKey} cx="50%" cy="50%" innerRadius={activeType === 'donut' ? 48 : 0} outerRadius={exportMode ? 88 : 100} fill="#8884d8" label={renderPieLabel} isAnimationActive={false}>
+                {pieRows.map((_: any, index: number) => (
                   <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                 ))}
               </Pie>
@@ -394,7 +423,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
                 <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={yAxisFormatter} />
-                <RechartsTooltip contentStyle={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)', borderRadius: '8px' }} />
+                <RechartsTooltip formatter={tooltipFormatter} contentStyle={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-color)', borderRadius: '8px' }} />
                 <Legend wrapperStyle={{ fontSize: '12px' }} />
                 <Line type="monotone" dataKey="actual" name={c.legendActual || c.actual || 'Actual'} stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} isAnimationActive={false} />
                 <Line type="monotone" dataKey="fitted" name={c.legendFit || c.modelFit || 'Model Fit'} stroke="#93c5fd" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} />
@@ -525,7 +554,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                     {config.cluster_profiles.map((profile: any) => (
                       <tr key={profile.cluster_id}>
                         <td><span className="cluster-dot" style={{ backgroundColor: COLORS[profile.cluster_id % COLORS.length] }} /> {profile.cluster_name || `#${profile.cluster_id}`}</td>
-                        <td>{profile.size_pct}%</td>
+                        <td>{formatPercent(profile.size_pct, { locale, input: 'percent', maximumFractionDigits: 1 })}</td>
                         <td className="text-xs">{Object.keys(profile).filter(k => k.endsWith('_mean')).map(k => (<div key={k}>{k.replace('_mean', '')}: {yAxisFormatter(profile[k])}</div>))}</td>
                         {hasTopCategories && (
                           <td className="text-xs cluster-top-categories">
@@ -556,7 +585,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                   <tr key={i}>
                     <td>{row['Var A']}</td>
                     <td>{row['Var B']}</td>
-                    <td className={Math.abs(row['Correlation']) > 0.6 ? 'high-corr' : ''}>{(row['Correlation'] * 100).toFixed(0)}%</td>
+                    <td className={Math.abs(row['Correlation']) > 0.6 ? 'high-corr' : ''}>{formatPercent(row['Correlation'], { locale, input: 'ratio', maximumFractionDigits: 0 })}</td>
                   </tr>
                 ))}
               </tbody>

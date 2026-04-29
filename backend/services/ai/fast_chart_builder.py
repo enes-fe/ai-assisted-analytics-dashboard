@@ -6,7 +6,7 @@ from typing import Optional
 
 import pandas as pd
 
-from services.utils import select_label_column
+from services.utils import format_col_name, select_label_column
 
 from .schemas import FastSemanticPlan
 
@@ -147,11 +147,14 @@ def _bar_chart(df: pd.DataFrame, metric: str, dimension: str, domain: str) -> Op
         return {
             "id": _chart_id(),
             "type": "bar",
-            "title": f"{agg_label} {metric} — {dimension}",
+            "title": f"{agg_label} {format_col_name(metric)} - {format_col_name(dimension)}",
             "xAxisKey": dimension,
             "series": [{"key": metric}],
             "chartData": _records(grouped),
-            "insight": f"{metric} metriği {dimension} kırılımında {agg_label.lower()} olarak gösterilmektedir.",
+            "insight": (
+                f"Bu grafik, {format_col_name(dimension)} kategorilerini "
+                f"{format_col_name(metric)} için {agg_label.lower()} değerlerle karşılaştırır."
+            ),
             "source": "groq_fast_semantic_plan",
         }
     except Exception:
@@ -184,11 +187,14 @@ def _pie_chart(df: pd.DataFrame, metric: str, dimension: str, domain: str) -> Op
         return {
             "id": _chart_id(),
             "type": "pie",
-            "title": f"{agg_label} {metric} Dağılımı — {dimension}",
+            "title": f"{agg_label} {format_col_name(metric)} Dağılımı - {format_col_name(dimension)}",
             "xAxisKey": dimension,
             "series": [{"key": metric}],
             "chartData": _records(grouped),
-            "insight": f"{metric} metriği {dimension} kategorilerinde pay olarak gösterilmektedir.",
+            "insight": (
+                f"Bu grafik, {format_col_name(dimension)} kategorilerinin "
+                f"{format_col_name(metric)} içindeki payını gösterir."
+            ),
             "source": "groq_fast_semantic_plan",
         }
     except Exception:
@@ -210,13 +216,16 @@ def _scatter_chart(df: pd.DataFrame, metric1: str, metric2: str, label_col: Opti
         return {
             "id": _chart_id(),
             "type": "scatter",
-            "title": f"{metric1} ve {metric2} İlişkisi",
+            "title": f"{format_col_name(metric1)} ve {format_col_name(metric2)} İlişkisi",
             "xAxisKey": metric1,
             "series": [{"key": metric2}],
             "chartData": _records(plot_df),
             "labelKey": "__label" if label_col else None,
             "labelName": label_col,
-            "insight": f"{metric1} ile {metric2} arasındaki ilişki gösteriliyor.",
+            "insight": (
+                f"Bu dağılım, {format_col_name(metric1)} ve {format_col_name(metric2)} "
+                "arasındaki ilişkiyi görselleştirir; nedensellik göstermez."
+            ),
             "source": "groq_fast_semantic_plan",
         }
     except Exception:
@@ -246,11 +255,11 @@ def _line_chart(df: pd.DataFrame, metric: str, time_col: str) -> Optional[dict]:
         return {
             "id": _chart_id(),
             "type": "line",
-            "title": f"{metric} Trendi",
+            "title": f"{format_col_name(metric)} Trendi",
             "xAxisKey": time_col,
             "series": [{"key": metric}],
             "chartData": _records(grouped),
-            "insight": f"{metric} metriği zaman içindeki trendi gösteriyor.",
+            "insight": f"Bu grafik, {format_col_name(metric)} değerinin zaman içindeki değişimini özetler.",
             "source": "groq_fast_semantic_plan",
         }
     except Exception:

@@ -58,11 +58,22 @@ def _chart_title(chart_type: str, value_col: Optional[str], dimension: Optional[
 
 def _chart_insight(chart_type: str, value_col: Optional[str], dimension: Optional[str], second_metric: Optional[str] = None) -> str:
     if chart_type == "scatter" and value_col and second_metric:
-        return f"{format_col_name(value_col)} ile {format_col_name(second_metric)} arasındaki ilişki gösteriliyor."
+        return (
+            f"Bu dağılım, {format_col_name(value_col)} ve {format_col_name(second_metric)} "
+            "arasındaki ilişkiyi görselleştirir; nedensellik göstermez."
+        )
+    if chart_type in {"pie", "donut"} and value_col and dimension:
+        return (
+            f"Bu grafik, {format_col_name(dimension)} kategorilerinin "
+            f"{format_col_name(value_col)} içindeki payını gösterir."
+        )
     if value_col and dimension:
-        return f"{format_col_name(value_col)} metriği {format_col_name(dimension)} kırılımında özetlendi."
+        return (
+            f"Bu grafik, {format_col_name(dimension)} kategorilerini "
+            f"{format_col_name(value_col)} için karşılaştırır."
+        )
     if dimension:
-        return f"Kayıt sayısı {format_col_name(dimension)} kırılımında özetlendi."
+        return f"Bu grafik, {format_col_name(dimension)} kategorilerindeki kayıt sayılarını özetler."
     return "Seçilen alanlar tablo görünümünde listelendi."
 
 
@@ -174,7 +185,11 @@ def build_chart_from_plan(df: pd.DataFrame, plan: ChartPlan) -> Optional[dict]:
 
         chart_data = _records(grouped)
         # Derive title from actual columns, not the LLM plan (avoids title/data mismatch bugs)
-        auto_title = f"{format_col_name(value_col)} — {format_col_name(dimension)} Analizi"
+        auto_title = f"{format_col_name(value_col)} - {format_col_name(dimension)} Analizi"
+        insight = _chart_insight(chart_type, value_col, dimension, second_metric)
+        reason = (plan.reason or "").lower()
+        if "fallback" in reason or "not supported" in reason or "desteklen" in reason:
+            insight = f"{insight} İstenen grafik türü desteklenmediği için uyumlu bir grafik kullanıldı."
         return {
             "id": _chart_id(plan),
             "type": chart_type,
@@ -182,7 +197,7 @@ def build_chart_from_plan(df: pd.DataFrame, plan: ChartPlan) -> Optional[dict]:
             "xAxisKey": dimension,
             "series": [{"key": key} for key in series_keys],
             "chartData": chart_data,
-            "insight": plan.reason,
+            "insight": insight,
             "source": "ollama_semantic_planner",
         }
     except Exception:

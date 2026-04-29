@@ -14,6 +14,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { ResponsiveGridLayout } from 'react-grid-layout';
 import type { PendingSelection, UploadResponse, DataRow } from '../types';
+import { formatNumber } from '../utils/numberFormat';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import './Dashboard.css';
@@ -230,10 +231,10 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
           setMlCharts(prev => [...prev.filter(c => c.type !== 'forecast'), ...forecastData.charts]);
         } else {
           setMlCharts(prev => prev.filter(c => c.type !== 'forecast'));
-          setForecastMessage(forecastData.error || 'Forecast hazirlanamadi: uygun zaman serisi bulunamadi.');
+          setForecastMessage(forecastData.error || 'Forecast hazırlanamadı: uygun zaman serisi bulunamadı.');
         }
       } catch {
-        setForecastMessage('Forecast hazirlanamadi: forecast servisine ulasilamadi.');
+        setForecastMessage('Forecast hazırlanamadı: forecast servisine ulaşılamadı.');
       }
 
       const clusterRes = await fetch(`/api/ml/cluster/${id}`, {
@@ -246,11 +247,11 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
         setMlCharts(prev => [...prev.filter(c => c.type !== 'clustering'), ...clusterData.charts]);
       } else {
         setMlCharts(prev => prev.filter(c => c.type !== 'clustering'));
-        setClusterMessage(clusterData.error || 'Clustering hazirlanamadi: uygun numerik kolon bulunamadi.');
+        setClusterMessage(clusterData.error || 'Clustering hazırlanamadı: uygun numerik kolon bulunamadı.');
       }
     } catch (e) {
       console.error('ML Analytics failed', e);
-      setClusterMessage('Clustering hazirlanamadi: clustering servisine ulasilamadi.');
+      setClusterMessage('Clustering hazırlanamadı: clustering servisine ulaşılamadı.');
     }
   };
 
@@ -364,7 +365,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
         throw new Error('Report export layout is not ready.');
       }
 
-      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
       const margin = 12;
@@ -383,19 +384,20 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
       document.body.classList.add('is-exporting-report');
 
       for (const section of sections) {
+        const captureScale = Math.min(1.35, Math.max(1.1, window.devicePixelRatio || 1));
         const canvas = await html2canvas(section, {
-          scale: 2,
+          scale: captureScale,
           useCORS: true,
           logging: false,
           backgroundColor: '#f8fafc',
           scrollX: 0,
           scrollY: 0,
-          windowWidth: reportRoot.scrollWidth,
-          windowHeight: reportRoot.scrollHeight,
+          windowWidth: Math.min(reportRoot.scrollWidth, 1120),
+          windowHeight: section.scrollHeight,
           ignoreElements: element => element.classList?.contains('no-export') || false,
         });
 
-        const imageData = canvas.toDataURL('image/png');
+        const imageData = canvas.toDataURL('image/jpeg', 0.82);
         let imageWidth = contentWidth;
         let imageHeight = (canvas.height / canvas.width) * imageWidth;
 
@@ -412,7 +414,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
         }
 
         const x = margin + (contentWidth - imageWidth) / 2;
-        pdf.addImage(imageData, 'PNG', x, y, imageWidth, imageHeight);
+        pdf.addImage(imageData, 'JPEG', x, y, imageWidth, imageHeight, undefined, 'FAST');
         y += imageHeight + 5;
       }
 
@@ -486,7 +488,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
       <div className="dashboard-header">
         <div className="dashboard-title-group">
           <h2 className="page-title" title={filename}>{filename || 'Analitik Panel'}</h2>
-          <p className="page-subtitle">{rowCount.toLocaleString('tr-TR')} {d.subtitle}</p>
+          <p className="page-subtitle">{formatNumber(rowCount, { mode: 'full', locale: 'tr-TR', maximumFractionDigits: 0 })} {d.subtitle}</p>
         </div>
 
         <div className="dashboard-center-group no-export">

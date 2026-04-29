@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ArrowDownRight, ArrowUpRight, AlertCircle, MoreHorizontal, SlidersHorizontal } from 'lucide-react';
 import { useLang } from '../contexts/useLang';
+import { formatNumber } from '../utils/numberFormat';
 import './KPICard.css';
 
 
@@ -34,8 +35,9 @@ export default function KPICard({ config, numberFormat = 'compact', onConfigure 
   const [localFormat, setLocalFormat] = useState<'compact' | 'full' | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const k = t.kpi;
+  const locale = lang === 'tr' ? 'tr-TR' : 'en-US';
 
   const handleTitleChange = (val: string) => {
     setEditableTitle(val);
@@ -65,16 +67,9 @@ export default function KPICard({ config, numberFormat = 'compact', onConfigure 
   const activeFormat = localFormat || numberFormat;
   const hasVisibleInsight = editableInsight.trim().length > 0;
 
-  const formatValue = (val: number, format: 'compact' | 'full') => {
-    if (format === 'compact') {
-      if (val >= 1_000_000_000) return `${(val / 1_000_000_000).toFixed(2)}B`;
-      if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(2)}M`;
-      if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
-    }
-    return val % 1 !== 0 ? val.toLocaleString(undefined, { maximumFractionDigits: 2 }) : val.toLocaleString();
-  };
-
-  const displayValue = config.rawValue !== undefined ? formatValue(config.rawValue, activeFormat) : value;
+  const displayValue = config.rawValue !== undefined
+    ? formatNumber(config.rawValue, { mode: activeFormat, locale, maximumFractionDigits: 2 })
+    : formatNumber(value, { mode: activeFormat, locale, maximumFractionDigits: 2, fallback: String(value ?? '-') });
 
   return (
     <div className="kpi-card">

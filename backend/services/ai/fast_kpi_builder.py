@@ -6,6 +6,8 @@ from typing import Optional
 
 import pandas as pd
 
+from services.utils import format_col_name
+
 from .schemas import FastSemanticPlan
 
 # Aggregation inference by column name keywords
@@ -90,15 +92,12 @@ def build_kpis_from_fast_plan(
             {
                 "id": f"ai-kpi-{uuid.uuid4().hex[:8]}",
                 "column": metric,
-                "title": metric,
+                "title": format_col_name(metric),
                 "value": _fmt(safe, agg),
                 "rawValue": safe,
                 "trend": "AI-selected",
                 "trendDirection": "neutral",
-                "insight": (
-                    f"Selected by Groq semantic planner as an important metric. "
-                    f"Aggregation: {agg}."
-                ),
+                "insight": f"Bu KPI, {format_col_name(metric)} için {'toplam' if agg == 'sum' else 'ortalama'} değeri özetler.",
             }
         )
 

@@ -296,17 +296,17 @@ def run_forecasting(df: pd.DataFrame, periods: int = 6) -> list | dict:
             continue
 
     if not date_col:
-        return {"error": "Forecast hazirlanamadi: tarih kolonu bulunamadi."}
+        return {"error": "Forecast hazırlanamadı: tarih kolonu bulunamadı."}
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
-        return {"error": "Forecast hazirlanamadi: numerik metrik bulunamadi."}
+        return {"error": "Forecast hazırlanamadı: numerik metrik bulunamadı."}
 
     df_temp = df.copy()
     df_temp[date_col] = pd.to_datetime(df_temp[date_col], errors="coerce")
     df_temp = df_temp.dropna(subset=[date_col]).sort_values(date_col)
     if df_temp.empty:
-        return {"error": "Forecast hazirlanamadi: tarih kolonunda yeterli gecerli deger yok."}
+        return {"error": "Forecast hazırlanamadı: tarih kolonunda yeterli geçerli değer yok."}
 
     days = (df_temp[date_col].max() - df_temp[date_col].min()).days
     if days > 730:
@@ -405,7 +405,7 @@ def run_forecasting(df: pd.DataFrame, periods: int = 6) -> list | dict:
             continue
 
     if not results:
-        return {"error": "Forecast hazirlanamadi: en az 4 zaman noktasi olan numerik seri bulunamadi."}
+        return {"error": "Forecast hazırlanamadı: en az 4 zaman noktası olan numerik seri bulunamadı."}
 
     return results
 

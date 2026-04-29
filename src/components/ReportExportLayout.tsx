@@ -3,6 +3,7 @@ import type { ChartConfig } from './ChartWidget';
 import type { KPIConfig } from './KPICard';
 import type { DataRow } from '../types';
 import { useLang } from '../contexts/useLang';
+import { formatNumber } from '../utils/numberFormat';
 import './ReportExportLayout.css';
 
 type AiDashboardStatus = 'idle' | 'loading' | 'success' | 'timeout' | 'error';
@@ -26,25 +27,27 @@ const REPORT_COPY = {
   tr: {
     title: 'Analitik Rapor',
     dataset: 'Veri seti',
-    generated: 'Uretildi',
-    rows: 'Kayit sayisi',
-    kpis: 'KPI Ozeti',
+    generated: 'Üretildi',
+    rows: 'Kayıt sayısı',
+    kpis: 'KPI Özeti',
     mainCharts: 'Ana Grafikler',
     forecast: 'Tahmin Analizi',
     segmentation: 'Segmentasyon Analizi',
-    insights: 'Icgozu Ozetleri',
-    notes: 'Notlar ve Uyarilar',
+    insights: 'İçgörü Özetleri',
+    notes: 'Notlar ve Uyarılar',
     noKpis: 'Bu raporda KPI bulunmuyor.',
-    noCharts: 'Bu bolum icin grafik bulunmuyor.',
-    noInsights: 'Ozetlenecek icgozu bulunmuyor.',
-    noNotes: 'Belirgin not veya uyari yok.',
+    noCharts: 'Bu bölüm için grafik bulunmuyor.',
+    noForecast: 'Uygun tarih kolonu ve yeterli zaman serisi bulunamadığı için tahmin grafiği eklenmedi.',
+    noSegmentation: 'Yeterli uygun numerik kolon bulunamadığı için segmentasyon grafiği eklenmedi.',
+    noInsights: 'Özetlenecek nitelikli içgörü bulunmuyor.',
+    noNotes: 'Belirgin not veya uyarı yok.',
     kpiLabel: 'KPI',
     chartLabel: 'Grafik',
     forecastLabel: 'Tahmin',
     segmentLabel: 'Segmentasyon',
-    aiLoading: 'AI analizi rapor alindigi anda hazirlaniyordu.',
-    aiTimeout: 'AI analizi zaman asimina ugradi.',
-    aiError: 'AI analizi tamamlanamadi.',
+    aiLoading: 'AI analizi rapor alındığı anda hazırlanıyordu.',
+    aiTimeout: 'AI analizi zaman aşımına uğradı.',
+    aiError: 'AI analizi tamamlanamadı.',
   },
   en: {
     title: 'Analytics Report',
@@ -59,6 +62,8 @@ const REPORT_COPY = {
     notes: 'Notes and Warnings',
     noKpis: 'No KPIs are available for this report.',
     noCharts: 'No charts are available for this section.',
+    noForecast: 'No forecast chart was added because a suitable time series was not available.',
+    noSegmentation: 'No segmentation chart was added because enough suitable numeric columns were not available.',
     noInsights: 'No insights are available to summarize.',
     noNotes: 'No notable warnings.',
     kpiLabel: 'KPI',
@@ -113,12 +118,22 @@ export default function ReportExportLayout({
 
   const formatValue = (kpi: KPIConfig) => {
     if (typeof kpi.rawValue === 'number') {
-      return new Intl.NumberFormat(locale, numberFormat === 'compact'
-        ? { notation: 'compact', maximumFractionDigits: 2 }
-        : { maximumFractionDigits: 2 }
-      ).format(kpi.rawValue);
+      return formatNumber(kpi.rawValue, { mode: numberFormat, locale, maximumFractionDigits: 2 });
     }
-    return String(kpi.value);
+    return formatNumber(kpi.value, { mode: numberFormat, locale, maximumFractionDigits: 2, fallback: String(kpi.value ?? '-') });
+  };
+
+  const isUsefulInsight = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    const lowValuePatterns = [
+      /selected by groq semantic planner/i,
+      /^aggregation:/i,
+      /^dagilim ozeti\.?$/i,
+      /metriği .* gösterilmektedir/i,
+      /metriği .* olarak gösterilmektedir/i,
+    ];
+    return !lowValuePatterns.some(pattern => pattern.test(trimmed));
   };
 
   const warningText = (code: string) => {
@@ -148,7 +163,7 @@ export default function ReportExportLayout({
         title: readStoredText(`kpi_title_${kpi.id}`, kpi.title),
         text: readStoredText(`kpi_insight_${kpi.id}`, kpi.insight || ''),
       }))
-      .filter(item => item.text.trim()),
+      .filter(item => isUsefulInsight(item.text)),
     ...allCharts
       .map(chart => ({
         id: `chart-${chart.id}`,
@@ -156,7 +171,7 @@ export default function ReportExportLayout({
         title: readStoredText(`chart_title_${chart.id}`, chart.title),
         text: readStoredText(`chart_insight_${chart.id}`, chart.insight || ''),
       }))
-      .filter(item => item.text.trim()),
+      .filter(item => isUsefulInsight(item.text)),
   ];
 
   const notes = [
@@ -184,7 +199,7 @@ export default function ReportExportLayout({
         className={`report-section report-chart-section report-chart-section--${chart.type} export-section`}
         data-export-section="true"
       >
-        <SectionHeading title={sectionTitle} eyebrow={index > 0 ? sectionTitle : undefined} />
+        {index === 0 && <SectionHeading title={sectionTitle} />}
         <ChartWidget key={`${chart.id}-${generatedAt.getTime()}`} config={chart} data={data} numberFormat={numberFormat} exportMode />
       </section>
     ));
@@ -205,7 +220,7 @@ export default function ReportExportLayout({
           </div>
           <div>
             <dt>{copy.rows}</dt>
-            <dd>{rowCount > 0 ? rowCount.toLocaleString(locale) : '-'}</dd>
+            <dd>{rowCount > 0 ? formatNumber(rowCount, { mode: 'full', locale, maximumFractionDigits: 0 }) : '-'}</dd>
           </div>
         </dl>
       </section>
@@ -224,7 +239,7 @@ export default function ReportExportLayout({
                   {kpi.trend && kpi.trendDirection !== 'neutral' && (
                     <div className={`report-kpi-trend report-kpi-trend--${kpi.trendDirection}`}>{kpi.trend}</div>
                   )}
-                  {insight.trim() && <p className="report-kpi-insight">{insight}</p>}
+                  {isUsefulInsight(insight) && <p className="report-kpi-insight">{insight}</p>}
                 </div>
               );
             })}
@@ -235,8 +250,8 @@ export default function ReportExportLayout({
       </section>
 
       {renderChartSections(copy.mainCharts, mainCharts, copy.noCharts)}
-      {renderChartSections(copy.forecast, forecastCharts, copy.noCharts)}
-      {renderChartSections(copy.segmentation, segmentationCharts, copy.noCharts)}
+      {renderChartSections(copy.forecast, forecastCharts, forecastMessage || copy.noForecast)}
+      {renderChartSections(copy.segmentation, segmentationCharts, clusterMessage || copy.noSegmentation)}
 
       {chunkItems(insightItems, 6).map((chunk, index) => (
         <section className="report-section export-section" data-export-section="true" key={`insights-${index}`}>

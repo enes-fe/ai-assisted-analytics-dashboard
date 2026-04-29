@@ -105,13 +105,13 @@ def generate_heuristic_charts(
             is_normal = normality_result.get("is_normal", False)
             if "is_normal" not in normality_result:
                 is_normal = abs(p.get("skewness", 0)) <= 0.5
-            normality_note = "Normal dagilim" if is_normal else "Normal dagilim degil; medyan daha temsil edici olabilir."
+            normality_note = "Normal dağılım" if is_normal else "Normal dağılım değil; medyan daha temsil edici olabilir."
 
-        insight = "Dagilim ozeti."
+        insight = "Bu grafik, değerlerin dağılımını özetler."
         if p.get("outlier_ratio", 0) > 0.05:
-            insight = f"Aykiri deger orani yuksek gorunuyor ({p['outlier_ratio']:.1%}); dagilim temkinli okunmali."
+            insight = f"Aykırı değer oranı yüksek görünüyor ({p['outlier_ratio']:.1%}); dağılım temkinli okunmalıdır."
         elif abs(p.get("skewness", 0)) > 0.5:
-            insight = f"Dagilim belirgin sekilde asimetrik gorunuyor (skewness={p['skewness']:.2f})."
+            insight = f"Dağılım belirgin şekilde asimetrik görünüyor (skewness={p['skewness']:.2f})."
 
         try:
             counts, bin_edges = np.histogram(series_clean, bins=15)
@@ -119,7 +119,7 @@ def generate_heuristic_charts(
             chart = {
                 "id": f"hist-{col}",
                 "type": "bar",
-                "title": f"{format_col_name(col)} — Dağılım Analizi",
+                "title": f"{format_col_name(col)} - Dağılım Analizi",
                 "xAxisKey": "range",
                 "series": [{"key": "count"}],
                 "insight": insight,
@@ -168,7 +168,7 @@ def generate_heuristic_charts(
                 "title": f"Bileşim: {col}",
                 "xAxisKey": col,
                 "series": [{"key": "count"}],
-                "insight": f"Analiz {len(data)} farklı segmentte dağılımı gösteriyor.",
+                "insight": f"Bu grafik, {format_col_name(col)} kategorilerindeki kayıt dağılımını gösterir.",
                 "chartData": data.fillna(0).to_dict(orient="records"),
             })
         else:
@@ -182,11 +182,11 @@ def generate_heuristic_charts(
             data.columns = [col, "count"]
 
             if top3_pct > 70:
-                insight = f"Yüksek konsantrasyon: İlk 3 kategori toplam hacmin %{top3_pct:.1f}'ini oluşturuyor."
+                insight = f"İlk 3 kategori dağılımın %{top3_pct:.1f}'ini oluşturuyor; sonuçlar bu yoğunlaşma dikkate alınarak okunmalıdır."
             elif top3_pct > 40:
                 insight = f"İlk 3 kategori toplam dağılımın %{top3_pct:.1f}'ini temsil ediyor."
             else:
-                insight = "Dengeli dağılım: Öncü segmentler görece eşit paylarla görünüyor."
+                insight = "Kategoriler görece dengeli dağılıyor."
 
             bar_count = sum(1 for c in charts if c.get("type") == "bar")
             charts.append({
@@ -248,10 +248,10 @@ def generate_heuristic_charts(
                 relational_charts.append({
                     "id": f"line-{d_col}-{n_col}",
                     "type": "line",
-                    "title": f"{format_col_name(n_col)} — Zaman İçinde Trend",
+                    "title": f"{format_col_name(n_col)} - Zaman İçinde Trend",
                     "xAxisKey": d_col,
                     "series": [{"key": n_col}],
-                    "insight": f"{n_col} değerinin {d_col} periyotlarındaki dalgalanma analizi.",
+                    "insight": f"Bu grafik, {format_col_name(n_col)} değerinin {format_col_name(d_col)} boyunca değişimini özetler.",
                     "chartData": line_data.fillna(0).to_dict(orient="records"),
                 })
             except Exception:
@@ -322,10 +322,10 @@ def generate_heuristic_charts(
                             charts.append({
                                 "id": f"bar-{cat}-{num}",
                                 "type": "bar",
-                                "title": f"Ortalama {format_col_name(num)} — {format_col_name(cat)} Bazında",
+                                "title": f"Ortalama {format_col_name(num)} - {format_col_name(cat)} Bazında",
                                 "xAxisKey": cat,
                                 "series": [{"key": num}],
-                                "insight": f"{cat} segmentlerinde metrik varyansı analizi.",
+                                "insight": f"Bu grafik, {format_col_name(cat)} kategorileri arasında ortalama {format_col_name(num)} değerlerini karşılaştırır.",
                                 "chartData": data.fillna(0).to_dict(orient="records"),
                             })
                         except Exception:
@@ -417,10 +417,13 @@ def generate_heuristic_charts(
         relational_charts.append({
             "id": f"scatter-{n1}-{n2}",
             "type": "scatter",
-            "title": f"{format_col_name(n1)} ve {format_col_name(n2)} — Korelasyon",
+            "title": f"{format_col_name(n1)} ve {format_col_name(n2)} - Korelasyon",
             "xAxisKey": n1,
             "series": [{"key": n2}],
-            "insight": f"Iliski ozeti: korelasyon {corr:.2f} ({strength}). Bu desen nedensellik iddiasi olarak yorumlanmamalidir.",
+            "insight": (
+                f"Bu dağılım, {format_col_name(n1)} ve {format_col_name(n2)} arasındaki ilişkiyi "
+                f"görselleştirir; nedensellik göstermez. Korelasyon: {corr:.2f} ({strength})."
+            ),
             "chartData": scatter_data,
             "labelKey": "__label" if label_col else None,
             "labelName": label_col,
