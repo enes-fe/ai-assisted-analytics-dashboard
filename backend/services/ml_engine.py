@@ -185,9 +185,9 @@ def _cluster_name(cluster_id: int, feature_rankings: list[dict], domain: str) ->
         if "Low Price" in phrases and "Low Profit" in phrases:
             return "Low Price / Low Profit Segment"
         if "High Volume" in phrases and "Profitable" in phrases:
-            return "High Volume Profitable Segment"
+            return "High Volume / Higher Profit Pattern"
         if "Premium" in phrases and any(p in phrases for p in ["Profitable", "High Volume"]):
-            return "Premium High-Value Segment"
+            return "Premium Price / Higher Metric Pattern"
 
     if not top:
         balanced_phrase = _feature_phrase(feature_rankings[0], domain)
@@ -376,6 +376,11 @@ def run_forecasting(df: pd.DataFrame, periods: int = 6) -> list | dict:
                 for i in range(periods)
             ]
             trend_dir = getForecastDirection(forecast)
+            caution_note = (
+                " Model fit or backtest quality is weak; use this as a directional scenario, not a precise forecast."
+                if any(w in forecast_warnings for w in ["low_r2", "high_error", "low_data"])
+                else " Review backtest metrics before relying on the forecast."
+            )
 
             results.append({
                 "id": f"forecast-{target_col}",
@@ -390,8 +395,8 @@ def run_forecasting(df: pd.DataFrame, periods: int = 6) -> list | dict:
                 "trend_direction": trend_dir,
                 "trend_source": "forecast_series",
                 "insight": (
-                    f"Trend sinyali: {target_col}. R²={r2:.2f}. Yön: {trend_dir}. "
-                    "Tahmin güveni için backtest hata metriklerini dikkate alın."
+                    f"Forecast signal for {target_col}: R2={r2:.2f}, direction={trend_dir}."
+                    f"{caution_note}"
                 ),
                 "historical": historical,
                 "forecast": forecast,
@@ -470,6 +475,11 @@ def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5)
         silhouette_text = "Silhouette Score: Not available."
     else:
         silhouette_text = f"Silhouette Score: {silhouette:.3f} ({silhouette_quality})."
+    segmentation_note = (
+        "Exploratory segmentation; weak separation means labels should be treated as tentative."
+        if "low_silhouette" in cluster_warnings or "high_overlap" in cluster_warnings
+        else "Segmentation summary; validate clusters against domain context before using them operationally."
+    )
 
     cluster_profiles: list = []
     cluster_sizes = []
@@ -539,7 +549,7 @@ def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5)
         "labelName": label_col,
         "metricKeys": selected_cols,
         "insight": (
-            f"Optimal k={optimal_k}. {len(df_result)} records were segmented across "
+            f"{segmentation_note} k={optimal_k}; {len(df_result)} records grouped across "
             f"{len(selected_cols)} features. {silhouette_text}"
         ),
         "chartData": scatter_data.fillna(0).to_dict(orient="records"),

@@ -43,7 +43,8 @@ MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
 MAX_PAGE_SIZE = int(os.getenv("MAX_PAGE_SIZE", "500"))
 CACHE_TTL_SECONDS = int(os.getenv("ANALYTICS_CACHE_TTL_SECONDS", "1800"))
 CACHE_MAX_ITEMS = int(os.getenv("ANALYTICS_CACHE_MAX_ITEMS", "20"))
-MAX_CORE_CHARTS = int(os.getenv("ANALYTICS_MAX_CORE_CHARTS", "12"))
+MAX_DEFAULT_MAIN_CHARTS = max(1, min(int(os.getenv("ANALYTICS_MAX_DEFAULT_MAIN_CHARTS", "6")), 6))
+MAX_CORE_CHARTS = max(1, min(int(os.getenv("ANALYTICS_MAX_CORE_CHARTS", str(MAX_DEFAULT_MAIN_CHARTS))), 6))
 
 
 def _cors_origins() -> list[str]:
@@ -62,6 +63,10 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _bounded_chart_count(value: int) -> int:
+    return max(1, min(value, MAX_DEFAULT_MAIN_CHARTS))
+
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -76,8 +81,8 @@ app.add_middleware(
 
 # Thread pool for CPU-bound analytics (keeps FastAPI event loop free)
 _executor = ThreadPoolExecutor(max_workers=4)
-# In-memory analytics cache: dataset_id -> (created_at, result)
-_analytics_cache: OrderedDict[int, tuple[float, dict[str, Any]]] = OrderedDict()
+# In-memory analytics cache: (dataset_id, advanced) -> (created_at, result)
+_analytics_cache: OrderedDict[tuple[int, bool], tuple[float, dict[str, Any]]] = OrderedDict()
 # In-memory fast semantic plan cache: dataset_id -> FastSemanticPlan
 _fast_plan_cache: dict[int, FastSemanticPlan] = {}
 
@@ -88,21 +93,27 @@ def _error(code: str, message: str) -> dict[str, str]:
     return {"code": code, "message": message}
 
 
-def _get_cached_analytics(dataset_id: int):
-    cached = _analytics_cache.get(dataset_id)
+def _analytics_cache_key(dataset_id: int, advanced: bool) -> tuple[int, bool]:
+    return (dataset_id, advanced)
+
+
+def _get_cached_analytics(dataset_id: int, advanced: bool):
+    key = _analytics_cache_key(dataset_id, advanced)
+    cached = _analytics_cache.get(key)
     if not cached:
         return None
     created_at, result = cached
     if time.time() - created_at > CACHE_TTL_SECONDS:
-        _analytics_cache.pop(dataset_id, None)
+        _analytics_cache.pop(key, None)
         return None
-    _analytics_cache.move_to_end(dataset_id)
+    _analytics_cache.move_to_end(key)
     return result
 
 
-def _set_cached_analytics(dataset_id: int, result: dict[str, Any]):
-    _analytics_cache[dataset_id] = (time.time(), result)
-    _analytics_cache.move_to_end(dataset_id)
+def _set_cached_analytics(dataset_id: int, advanced: bool, result: dict[str, Any]):
+    key = _analytics_cache_key(dataset_id, advanced)
+    _analytics_cache[key] = (time.time(), result)
+    _analytics_cache.move_to_end(key)
     while len(_analytics_cache) > CACHE_MAX_ITEMS:
         _analytics_cache.popitem(last=False)
 
@@ -250,7 +261,7 @@ async def get_fast_dashboard(dataset_id: int):
         raise HTTPException(status_code=404, detail="Dataset not found")
 
     timeout_seconds = _env_int("AI_SEMANTIC_TIMEOUT_SECONDS", 8)
-    max_charts = _env_int("AI_MAX_RECOMMENDED_CHARTS", 5)
+    max_charts = _bounded_chart_count(_env_int("AI_MAX_RECOMMENDED_CHARTS", 5))
     groq_model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
     # Check fast plan cache
@@ -342,12 +353,18 @@ async def get_fast_dashboard(dataset_id: int):
 
 
 @app.get("/api/analytics/core/{dataset_id}")
-async def get_core_analytics(dataset_id: int):
+async def get_core_analytics(
+    dataset_id: int,
+    advanced: bool = Query(False, description="Enable advanced/debug statistical tests."),
+):
     """Heuristic analytics — kept for debug and backward compatibility.
     Primary dashboard should use /api/ai/fast-dashboard/{dataset_id}.
+
+    Advanced statistical tests are intentionally opt-in so the default
+    dashboard contract stays focused and academically defensible.
     """
     # Serve from cache if available
-    cached = _get_cached_analytics(dataset_id)
+    cached = _get_cached_analytics(dataset_id, advanced)
     if cached is not None:
         return cached
 
@@ -357,8 +374,12 @@ async def get_core_analytics(dataset_id: int):
 
     def _run_analytics():
         kpis = ml_service.calculate_kpis(df)
-        stats = ml_service.run_statistical_tests(df)
-        charts = ml_service.generate_heuristic_charts(df, stat_tests=stats)
+        stats = ml_service.run_statistical_tests(df) if advanced else None
+        charts = ml_service.generate_heuristic_charts(
+            df,
+            stat_tests=stats,
+            advanced_stats=advanced,
+        )
         return {"kpis": kpis, "charts": charts, "statistical_tests": stats}
 
     try:
@@ -366,15 +387,21 @@ async def get_core_analytics(dataset_id: int):
         base_result = await loop.run_in_executor(_executor, _run_analytics)
 
         result = {
-            "kpis": base_result["kpis"],
+            "kpis": base_result["kpis"][:5],
             "charts": base_result["charts"][:MAX_CORE_CHARTS],
-            "statistical_tests": base_result["statistical_tests"],
+            "statistical_tests": base_result["statistical_tests"] if advanced else None,
+            "advanced_statistics": {
+                "enabled": advanced,
+                "available": True,
+                "enable_with": "/api/analytics/core/{dataset_id}?advanced=true",
+                "default_scope": "Advanced statistical tests are hidden from the default dashboard flow.",
+            },
             "semantic_plan": None,
-            "chart_generation_mode": "heuristic_debug",
+            "chart_generation_mode": "heuristic_debug_advanced" if advanced else "heuristic_debug_basic",
             "is_primary_dashboard": False,
-            "dashboard_generation_mode": "heuristic_debug",
+            "dashboard_generation_mode": "heuristic_debug_advanced" if advanced else "heuristic_debug_basic",
         }
-        _set_cached_analytics(dataset_id, result)
+        _set_cached_analytics(dataset_id, advanced, result)
         return result
     except Exception as e:
         traceback.print_exc()

@@ -19,6 +19,7 @@ interface ReportExportLayoutProps {
   aiStatus: AiDashboardStatus;
   aiMessage?: string;
   forecastMessage?: string;
+  clusterMessage?: string;
 }
 
 const REPORT_COPY = {
@@ -100,6 +101,7 @@ export default function ReportExportLayout({
   aiStatus,
   aiMessage,
   forecastMessage,
+  clusterMessage,
 }: ReportExportLayoutProps) {
   const { lang, t } = useLang();
   const copy = REPORT_COPY[lang];
@@ -162,6 +164,7 @@ export default function ReportExportLayout({
     ...(aiStatus === 'timeout' ? [aiMessage || copy.aiTimeout] : []),
     ...(aiStatus === 'error' ? [aiMessage || copy.aiError] : []),
     ...(forecastMessage ? [forecastMessage] : []),
+    ...(clusterMessage ? [clusterMessage] : []),
     ...allCharts.flatMap(chart => (chart.warnings || []).map(warning => `${readStoredText(`chart_title_${chart.id}`, chart.title)}: ${warningText(warning)}`)),
   ];
 

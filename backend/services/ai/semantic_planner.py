@@ -229,7 +229,7 @@ def _local_recommendations(df: pd.DataFrame, domain: str) -> list[ChartPlan]:
         if len(numeric_cols) >= 2:
             charts.append(_make_chart("scatter", f"{numeric_cols[0]} vs {numeric_cols[1]}", numeric_cols[0], None, "mean", "General relationship between numeric columns.", 3, second_metric=numeric_cols[1], sort="none"))
 
-    return charts[:8]
+    return charts[:6]
 
 
 def _enhance_plan_locally(plan: SemanticDatasetPlan, df: pd.DataFrame) -> SemanticDatasetPlan:
@@ -273,7 +273,7 @@ def _enhance_plan_locally(plan: SemanticDatasetPlan, df: pd.DataFrame) -> Semant
         detected_domain=domain,
         primary_entity=primary_entity,
         column_semantics=local_semantics,
-        recommended_charts=merged_charts[:8],
+        recommended_charts=merged_charts[:6],
     )
 
 
@@ -422,7 +422,7 @@ def _local_recommendations(df: pd.DataFrame, domain: str) -> list[ChartPlan]:
         if len(numeric_cols) >= 2:
             charts.append(_make_chart("scatter", f"{numeric_cols[0]} vs {numeric_cols[1]}", numeric_cols[0], None, "mean", "General relationship between numeric columns.", 3, second_metric=numeric_cols[1], sort="none"))
 
-    return charts[:8]
+    return charts[:6]
 
 
 def _enhance_plan_locally(plan: SemanticDatasetPlan, df: pd.DataFrame) -> SemanticDatasetPlan:
@@ -466,7 +466,7 @@ def _enhance_plan_locally(plan: SemanticDatasetPlan, df: pd.DataFrame) -> Semant
         detected_domain=domain,
         primary_entity=primary_entity,
         column_semantics=local_semantics,
-        recommended_charts=merged_charts[:8],
+        recommended_charts=merged_charts[:6],
     )
 
 
@@ -483,7 +483,7 @@ def _needs_local_enhancement(plan: SemanticDatasetPlan, df: pd.DataFrame) -> boo
 
 async def generate_semantic_dataset_plan(df: pd.DataFrame) -> SemanticDatasetPlan:
     max_cols = _env_int("AI_MAX_COLUMN_CARDS", 25)
-    max_charts = _env_int("AI_MAX_RECOMMENDED_CHARTS", 8)
+    max_charts = min(_env_int("AI_MAX_RECOMMENDED_CHARTS", 6), 6)
     cards = build_column_cards(df, max_cols=max_cols)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -491,7 +491,7 @@ async def generate_semantic_dataset_plan(df: pd.DataFrame) -> SemanticDatasetPla
             "role": "user",
             "content": (
                 f"Dataset has {len(df)} rows and {len(df.columns)} columns. "
-                f"Recommend 4 to {max_charts} high-value charts. Column cards:\n"
+                f"Recommend 4 to {max_charts} useful charts. Column cards:\n"
                 f"{json.dumps(cards, ensure_ascii=False)}"
             ),
         },

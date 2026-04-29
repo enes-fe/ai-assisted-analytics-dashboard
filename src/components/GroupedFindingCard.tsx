@@ -17,7 +17,7 @@ const GroupedFindingCard: React.FC<GroupedFindingCardProps> = ({ data }) => {
     <div className="test-result-card featured grouped-impact">
       <div className="card-top">
         <span className="insight-category">{data.category}</span>
-        <span className="sig-badge sig-yes">✓ High Strategic Impact</span>
+        <span className="sig-badge sig-yes">Statistical signal</span>
       </div>
       <p className="test-summary">{data.summary}</p>
       <div className="impact-tags">
@@ -27,7 +27,7 @@ const GroupedFindingCard: React.FC<GroupedFindingCardProps> = ({ data }) => {
       </div>
       <div className="card-bottom">
         <details className="technical-details">
-          <summary>Consolidated Data</summary>
+          <summary>Advanced details</summary>
           <div className="technical-content">
             <span className="sig-text">{data.significance_text}</span>
             <code>{data.technical}</code>

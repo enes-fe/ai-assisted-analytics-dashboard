@@ -4,7 +4,8 @@ services/chart_generator.py
 Heuristic chart generation engine.
 
 Analyses a DataFrame and produces a curated deck of chart configs
-without any LLM interaction.  Decision logic:
+without any LLM interaction. Default output is intentionally compact.
+Advanced statistical enrichments are opt-in. Decision logic:
   1. Histograms for non-trivial numeric distributions
   2. Pie / bar for categorical columns
   3. Correlation table when ≥ 3 numeric columns with strong relationships
@@ -24,7 +25,13 @@ from .kpi_engine import should_skip_histogram
 from .column_profiler import get_column_profile
 
 
-def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers_v_threshold: float = 0.3) -> list:
+def generate_heuristic_charts(
+    df: pd.DataFrame,
+    stat_tests: dict = None,
+    cramers_v_threshold: float = 0.3,
+    advanced_stats: bool | None = None,
+    max_charts: int = 6,
+) -> list:
     """
     Returns a JSON-serialisable list of chart config dicts.
 
@@ -38,6 +45,8 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
     cramers_v_threshold : float
         Minimum Cramér's V to generate a stacked-bar chart.
     """
+    if advanced_stats is None:
+        advanced_stats = bool(stat_tests and stat_tests.get("insights"))
     if stat_tests is None:
         stat_tests = {"insights": [], "normality": {}}
 
@@ -89,23 +98,25 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
         mean_val = float(series_clean.mean()) if not series_clean.empty else 0
         median_val = float(series_clean.median()) if not series_clean.empty else 0
 
-        normality_result = stat_tests.get("normality", {}).get(col, {})
-        is_normal = normality_result.get("is_normal", False)
-        if "is_normal" not in normality_result:
-            is_normal = abs(p.get("skewness", 0)) <= 0.5
+        is_normal = None
+        normality_note = None
+        if advanced_stats:
+            normality_result = stat_tests.get("normality", {}).get(col, {})
+            is_normal = normality_result.get("is_normal", False)
+            if "is_normal" not in normality_result:
+                is_normal = abs(p.get("skewness", 0)) <= 0.5
+            normality_note = "Normal dagilim" if is_normal else "Normal dagilim degil; medyan daha temsil edici olabilir."
 
-        normality_note = "Normal dağılım ✓" if is_normal else "Normal dağılım değil — medyan daha temsil edici"
-
-        insight = "Dağılım analizi."
+        insight = "Dagilim ozeti."
         if p.get("outlier_ratio", 0) > 0.05:
-            insight = f"Yüksek aykırı değer oranı ({p['outlier_ratio']:.1%}) tespit edildi. İstatistiksel yayılım ön plana çıktı."
-        elif not is_normal:
-            insight = f"Belirgin çarpıklık ({p['skewness']:.2f}) tespit edildi. Normal olmayan dağılıma işaret ediyor."
+            insight = f"Aykiri deger orani yuksek gorunuyor ({p['outlier_ratio']:.1%}); dagilim temkinli okunmali."
+        elif abs(p.get("skewness", 0)) > 0.5:
+            insight = f"Dagilim belirgin sekilde asimetrik gorunuyor (skewness={p['skewness']:.2f})."
 
         try:
             counts, bin_edges = np.histogram(series_clean, bins=15)
             hist_data = [{"range": f"{bin_edges[i]:.1f}", "count": int(counts[i])} for i in range(len(counts))]
-            charts.append({
+            chart = {
                 "id": f"hist-{col}",
                 "type": "bar",
                 "title": f"{format_col_name(col)} — Dağılım Analizi",
@@ -113,11 +124,15 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
                 "series": [{"key": "count"}],
                 "insight": insight,
                 "chartData": hist_data,
-                "isNormal": is_normal,
-                "normalityNote": normality_note,
-                "mean": mean_val,
-                "median": median_val,
-            })
+            }
+            if advanced_stats:
+                chart.update({
+                    "isNormal": is_normal,
+                    "normalityNote": normality_note,
+                    "mean": mean_val,
+                    "median": median_val,
+                })
+            charts.append(chart)
         except Exception:
             pass
 
@@ -188,7 +203,7 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
     # ─────────────────────────────────────────────────────────────────────────
     # 3. CORRELATION TABLE (num × num, Spearman)
     # ─────────────────────────────────────────────────────────────────────────
-    if len(num_cols) >= 3:
+    if advanced_stats and len(num_cols) >= 3:
         try:
             corr_mtx = temp_df[num_cols].corr(method="spearman").fillna(0)
             heatmap_data = []
@@ -245,7 +260,7 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
     # ─────────────────────────────────────────────────────────────────────────
     # 5. BOXPLOTS / GROUP BARS (categorical × numeric)
     # ─────────────────────────────────────────────────────────────────────────
-    if cat_cols and num_cols:
+    if advanced_stats and cat_cols and num_cols:
         try:
             fallback_candidates: list = []
             for cat in cat_cols[:3]:
@@ -376,18 +391,19 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
         r_squared = None
         coeffs = None
 
-        for insight_item in stat_tests.get("insights", []):
-            if insight_item.get("category") == "Correlation":
-                if n1 in insight_item["id"] and n2 in insight_item["id"]:
-                    if insight_item.get("significant") and abs(insight_item.get("r", 0)) >= 0.5:
-                        show_regression = True
-                        r_squared = insight_item.get("r", 0) ** 2
-                        try:
-                            m, b = np.polyfit(c_df[n1], c_df[n2], 1)
-                            coeffs = {"slope": float(m), "intercept": float(b)}
-                        except Exception:
-                            pass
-                    break
+        if advanced_stats:
+            for insight_item in stat_tests.get("insights", []):
+                if insight_item.get("category") == "Correlation":
+                    if n1 in insight_item["id"] and n2 in insight_item["id"]:
+                        if insight_item.get("significant") and abs(insight_item.get("r", 0)) >= 0.5:
+                            show_regression = True
+                            r_squared = insight_item.get("r", 0) ** 2
+                            try:
+                                m, b = np.polyfit(c_df[n1], c_df[n2], 1)
+                                coeffs = {"slope": float(m), "intercept": float(b)}
+                            except Exception:
+                                pass
+                        break
 
         sample_size = min(1000, len(c_df))
         sample_df = c_df.sample(sample_size, random_state=42).copy()
@@ -404,7 +420,7 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
             "title": f"{format_col_name(n1)} ve {format_col_name(n2)} — Korelasyon",
             "xAxisKey": n1,
             "series": [{"key": n2}],
-            "insight": f"Korelasyon Skoru: {corr:.2f} ({strength} ilişki). Yüksek skor ilişki gücünü gösterir, nedensellik değil.",
+            "insight": f"Iliski ozeti: korelasyon {corr:.2f} ({strength}). Bu desen nedensellik iddiasi olarak yorumlanmamalidir.",
             "chartData": scatter_data,
             "labelKey": "__label" if label_col else None,
             "labelName": label_col,
@@ -412,14 +428,16 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
             "showRegressionLine": show_regression,
             "rSquared": r_squared,
             "regressionCoeffs": coeffs,
-            "effect_size": abs(corr),
-            "effect_label": "large" if abs(corr) >= 0.5 else "medium" if abs(corr) >= 0.3 else "small",
+            **({
+                "effect_size": abs(corr),
+                "effect_label": "large" if abs(corr) >= 0.5 else "medium" if abs(corr) >= 0.3 else "small",
+            } if advanced_stats else {}),
         })
 
     # ─────────────────────────────────────────────────────────────────────────
     # 7. STACKED BARS (categorical × categorical, Cramér's V)
     # ─────────────────────────────────────────────────────────────────────────
-    if len(cat_cols) >= 2:
+    if advanced_stats and len(cat_cols) >= 2:
         for i in range(len(cat_cols)):
             for j in range(i + 1, len(cat_cols)):
                 c1, c2 = cat_cols[i], cat_cols[j]
@@ -462,4 +480,4 @@ def generate_heuristic_charts(df: pd.DataFrame, stat_tests: dict = None, cramers
     print(f"[CHART] relational={len(relational_charts)} single={len(charts)}")
 
     final_deck = relational_charts + charts[:2]
-    return sanitize_for_json(final_deck)
+    return sanitize_for_json(final_deck[: max(1, int(max_charts or 6))])

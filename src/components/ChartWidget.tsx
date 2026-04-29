@@ -66,6 +66,7 @@ interface ChartWidgetProps {
   numberFormat?: 'compact' | 'full';
   onRemove?: () => void;
   exportMode?: boolean;
+  showAdvancedStats?: boolean;
 }
 
 const COLORS = [
@@ -79,7 +80,7 @@ const VIBRANT_GRADIENT = [
   '#ef4444', '#f87171', '#64748b', '#94a3b8'
 ];
 
-export default function ChartWidget({ config, data, numberFormat = 'compact', onRemove, exportMode = false }: ChartWidgetProps) {
+export default function ChartWidget({ config, data, numberFormat = 'compact', onRemove, exportMode = false, showAdvancedStats = false }: ChartWidgetProps) {
   const chartDataToUse = config.chartData || data;
   const storageKey = `chart_title_${config.id}`;
   const typeKey = `chart_type_${config.id}`;
@@ -292,7 +293,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                   ))}
                 </Bar>
               ))}
-              {config.id.startsWith('hist-') && (
+              {showAdvancedStats && config.id.startsWith('hist-') && config.isNormal !== undefined && (
                 <>
                   {config.isNormal
                     ? <ReferenceLine x={config.mean} stroke="#10b981" strokeDasharray="3 3" label={{ value: c.mean, position: 'top', fill: '#10b981', fontSize: 10 }} />
@@ -517,7 +518,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                       <th>{c.clusterHeader || 'Cluster'}</th>
                       <th>{c.clusterSize}</th>
                       <th>{c.clusterFeatures}</th>
-                      {hasTopCategories && <th>Dominant categories</th>}
+                      {hasTopCategories && <th>{c.frequentCategories || 'Frequent categories'}</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -530,7 +531,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
                           <td className="text-xs cluster-top-categories">
                             {profile.top_categories?.length ? profile.top_categories.map((category: any) => (
                               <div key={category.column} className="top-category-row">
-                                <span>Top {String(category.label || category.column).toLowerCase()}:</span>
+                                <span>{c.frequentCategory || 'Frequent'} {String(category.label || category.column).toLowerCase()}:</span>
                                 <b>{category.values?.map((item: any) => item.value).slice(0, 3).join(', ')}</b>
                               </div>
                             )) : <span className="text-muted">-</span>}
@@ -650,7 +651,7 @@ export default function ChartWidget({ config, data, numberFormat = 'compact', on
               </label>
             )}
           </div>
-          {(config.normalityNote || config.rSquared || config.cramersV || config.effect_size !== undefined || config.quality) && (
+          {showAdvancedStats && (config.normalityNote || config.rSquared || config.cramersV || config.effect_size !== undefined || config.quality) && (
             <div className="stats-badges">
               {config.normalityNote && <span className={`stat-badge ${config.isNormal ? 'normal' : 'skewed'}`}>{config.isNormal ? (c.normalityNormal || c.normalDistribution || config.normalityNote) : (c.normalitySkewed || c.skewedDistribution || config.normalityNote)}</span>}
               {config.rSquared && <span className="stat-badge r2">R² = {config.rSquared.toFixed(3)}</span>}

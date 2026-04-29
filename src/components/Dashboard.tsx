@@ -47,6 +47,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [mlCharts, setMlCharts] = useState<ChartConfig[]>([]);
   const [forecastMessage, setForecastMessage] = useState('');
+  const [clusterMessage, setClusterMessage] = useState('');
   const [isGridLayout, setIsGridLayout] = useState(false);
   const [exportTimestamp, setExportTimestamp] = useState(() => new Date());
   // KPI config panel
@@ -121,6 +122,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
       setSelectedKpiCols([]);
       setMlCharts([]);
       setForecastMessage('');
+      setClusterMessage('');
       setAnalysisPhase('idle');
       setAiStatus('idle');
       onDatasetIdChange?.(null);
@@ -140,6 +142,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
     setSelectedKpiCols([]);
     setMlCharts([]);
     setForecastMessage('');
+    setClusterMessage('');
     setAnalysisPhase('complete'); // show data immediately
     setAiStatus('idle');
 
@@ -168,6 +171,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
     setSelectedKpiCols([]);
     setMlCharts([]);
     setForecastMessage('');
+    setClusterMessage('');
     setAnalysisPhase('complete');
     setAiStatus('idle');
 
@@ -217,6 +221,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
 
   const fetchMLAnalytics = async (id: number, clusterCols?: string[]) => {
     setForecastMessage('');
+    setClusterMessage('');
     try {
       try {
         const forecastRes = await fetch(`/api/ml/forecast/${id}`);
@@ -237,11 +242,15 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
         body: JSON.stringify({ selected_cols: clusterCols || null }),
       });
       const clusterData = await clusterRes.json();
-      if (clusterData.charts) {
+      if (clusterData.charts?.length > 0) {
         setMlCharts(prev => [...prev.filter(c => c.type !== 'clustering'), ...clusterData.charts]);
+      } else {
+        setMlCharts(prev => prev.filter(c => c.type !== 'clustering'));
+        setClusterMessage(clusterData.error || 'Clustering hazirlanamadi: uygun numerik kolon bulunamadi.');
       }
     } catch (e) {
       console.error('ML Analytics failed', e);
+      setClusterMessage('Clustering hazirlanamadi: clustering servisine ulasilamadi.');
     }
   };
 
@@ -615,6 +624,13 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
                 </div>
               )}
 
+              {clusterMessage && (
+                <div className="ai-status-banner ai-status-warn">
+                  <AlertTriangle size={15} />
+                  <span>{clusterMessage}</span>
+                </div>
+              )}
+
               {/* KPIs */}
               {kpiData.length > 0 && (
                 <div className="kpi-grid">
@@ -676,6 +692,7 @@ export default function Dashboard({ pendingSelection, onPendingConsumed, onDatas
             aiStatus={aiStatus}
             aiMessage={aiMessage}
             forecastMessage={forecastMessage}
+            clusterMessage={clusterMessage}
           />
         </div>
       )}
