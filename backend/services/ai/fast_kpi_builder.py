@@ -1,31 +1,23 @@
 from __future__ import annotations
 
 import math
-import uuid
+import re
 from typing import Optional
 
 import pandas as pd
 
 from services.utils import format_col_name
+from services.kpi_engine import MEAN_AGGREGATED_KEYWORDS
 
 from .schemas import FastSemanticPlan
-
-# Aggregation inference by column name keywords
-_SUM_KEYWORDS = [
-    "goal", "gol", "assist", "asist", "sales", "revenue", "profit",
-    "quantity", "cost", "amount", "delivery", "count", "total",
-]
-_MEAN_KEYWORDS = [
-    "rating", "score", "rate", "percentage", "pct", "ratio", "xg",
-    "avg", "average", "mean",
-]
 
 _MAX_KPIS = 4
 
 
 def _infer_agg(col: str) -> str:
+    """Return 'mean' if the column name signals a rate/score metric, else 'sum'."""
     n = col.lower()
-    if any(k in n for k in _MEAN_KEYWORDS):
+    if any(kw in n for kw in MEAN_AGGREGATED_KEYWORDS):
         return "mean"
     return "sum"
 
@@ -55,6 +47,12 @@ def _fmt(value: float, agg: str) -> str:
     return f"{value:,.0f}"
 
 
+def _stable_kpi_id(metric: str) -> str:
+    """Generate a deterministic, collision-resistant KPI ID from column name."""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", str(metric).strip()).strip("-").lower()
+    return f"ai-kpi-{slug or 'metric'}"
+
+
 def build_kpis_from_fast_plan(
     df: pd.DataFrame,
     fast_plan: FastSemanticPlan,
@@ -77,6 +75,8 @@ def build_kpis_from_fast_plan(
             unique_metrics.append(m)
 
     kpis: list[dict] = []
+    used_ids: set[str] = set()
+
     for metric in unique_metrics[:_MAX_KPIS]:
         agg = _infer_agg(metric)
         series = pd.to_numeric(df[metric], errors="coerce").dropna()
@@ -88,11 +88,23 @@ def build_kpis_from_fast_plan(
         if safe is None:
             continue
 
+        # Stable deterministic ID (no uuid)
+        kpi_id = _stable_kpi_id(metric)
+        # Ensure uniqueness within this batch
+        if kpi_id in used_ids:
+            suffix = 2
+            while f"{kpi_id}-{suffix}" in used_ids:
+                suffix += 1
+            kpi_id = f"{kpi_id}-{suffix}"
+        used_ids.add(kpi_id)
+
+        title_prefix = "Avg" if agg == "mean" else "Total"
+
         kpis.append(
             {
-                "id": f"ai-kpi-{uuid.uuid4().hex[:8]}",
+                "id": kpi_id,
                 "column": metric,
-                "title": format_col_name(metric),
+                "title": f"{title_prefix} {format_col_name(metric)}",
                 "value": _fmt(safe, agg),
                 "rawValue": safe,
                 "trend": "AI-selected",

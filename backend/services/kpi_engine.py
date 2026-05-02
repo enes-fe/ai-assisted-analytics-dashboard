@@ -37,6 +37,25 @@ DOMAIN_PRIORITY_KW = [
 ]
 
 
+# --- Shared aggregation keyword rules ------------------------------------------
+# Columns whose names match any of these tokens should be aggregated with mean.
+MEAN_AGGREGATED_KEYWORDS: frozenset = frozenset([
+    'percent', 'percentage', 'ratio', 'rate', 'pct', '%',
+    'accuracy', 'completion',
+    'rating', 'score', 'xg', 'avg', 'average', 'mean',
+    'index', 'satisfaction',
+])
+
+# Subset of MEAN_AGGREGATED_KEYWORDS whose values should be displayed as a pct
+PERCENT_DISPLAY_KEYWORDS: frozenset = frozenset([
+    'percent', 'percentage', 'pct', '%',
+])
+
+
+def _col_matches_keywords(col_lower: str, keywords: frozenset) -> bool:
+    return any(kw in col_lower for kw in keywords)
+
+
 def is_meaningless_total(col_name: str) -> bool:
     col_lower = col_name.lower().replace("_", " ")
     return any(p in col_lower for p in MEANINGLESS_TOTAL_PATTERNS)
@@ -131,7 +150,7 @@ def calculate_kpis(df: pd.DataFrame, selected_columns: list[str] | None = None) 
         if pd.api.types.is_numeric_dtype(df[col]):
             continue
         try:
-            test = pd.to_datetime(df[col].dropna().head(5), errors="coerce")
+            test = pd.to_datetime(df[col].dropna().head(5), errors="coerce", format="mixed")
             if not test.isna().all():
                 date_col = col
                 break
@@ -197,17 +216,21 @@ def calculate_kpis(df: pd.DataFrame, selected_columns: list[str] | None = None) 
 
         try:
             col_lower = col.lower()
-            # Only treat as percentage when the column name explicitly signals it
-            PERCENT_KEYWORDS = ["percent", "percentage", "ratio", "rate", "pct", "%", "accuracy", "completion"]
-            is_percentage = any(x in col_lower for x in PERCENT_KEYWORDS)
+            # Use shared keyword rules: mean for rate/score/rating/etc., sum for additive
+            is_mean_agg = _col_matches_keywords(col_lower, MEAN_AGGREGATED_KEYWORDS)
+            is_pct_display = _col_matches_keywords(col_lower, PERCENT_DISPLAY_KEYWORDS)
 
-            if is_percentage:
+            if is_mean_agg:
                 raw_val = series.mean()
                 if isinstance(raw_val, (pd.Timestamp, datetime.datetime)):
                     raise TypeError("Not a numeric value")
                 value = float(np.nan_to_num(raw_val))
-                formatted_val = f"{value:.1f}%" if value < 100 else f"{value:.0f}%"
                 title_prefix = "Avg"
+                if is_pct_display:
+                    formatted_val = f"{value:.1f}%" if value < 100 else f"{value:.0f}%"
+                else:
+                    # Decimal average (e.g. rating = 7.43)
+                    formatted_val = f"{value:.2f}"
             else:
                 raw_val = series.sum()
                 if isinstance(raw_val, (pd.Timestamp, datetime.datetime)):
@@ -224,9 +247,11 @@ def calculate_kpis(df: pd.DataFrame, selected_columns: list[str] | None = None) 
                     formatted_val = f"{value:,.0f}" if value % 1 == 0 else f"{value:,.2f}"
 
             # ── Trend ─────────────────────────────────────────────────────────
+            # Only compute half-period trend when a valid date column is present;
+            # cross-sectional datasets (no date) must not show spurious trend arrows.
             trend_str = "N/A"
             trend_dir = "neutral"
-            if len(series) >= 4:
+            if date_col and len(series) >= 4:
                 mid = len(series) // 2
                 first_half_mean = series.iloc[:mid].mean()
                 second_half_mean = series.iloc[mid:].mean()
@@ -240,8 +265,10 @@ def calculate_kpis(df: pd.DataFrame, selected_columns: list[str] | None = None) 
             unique_count = series.nunique()
             if unique_count <= 2:
                 insight = "İkili (binary) veri sütunu; KPI yorumu sınırlı."
-            elif is_percentage:
+            elif is_pct_display:
                 insight = f"Ortalama: {value:.1f}% — {'Artış' if trend_dir == 'up' else 'Düşüş' if trend_dir == 'down' else 'Stabil'}."
+            elif is_mean_agg:
+                insight = f"Ortalama değer: {formatted_val}."
             elif value == 0:
                 insight = "Tüm dönemde kayıt sıfır."
             elif trend_dir == "neutral":

@@ -241,7 +241,7 @@ def generate_heuristic_charts(
                 t_df = temp_df.copy()
                 t_df[d_col] = pd.to_datetime(t_df[d_col])
                 days = (t_df[d_col].max() - t_df[d_col].min()).days
-                resample_rule = "Y" if days > 730 else "M" if days > 30 else "D"
+                resample_rule = "Y" if days > 730 else "ME" if days > 30 else "D"
 
                 line_data = t_df.set_index(d_col)[n_col].resample(resample_rule).mean().reset_index()
                 line_data[d_col] = line_data[d_col].dt.strftime("%Y-%m-%d")
