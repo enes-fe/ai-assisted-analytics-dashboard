@@ -96,6 +96,10 @@ PROMPT_CHART_TYPE_ALIASES = {
 }
 
 SUPPORTED_OVERRIDE_TYPES = {"pie", "donut", "bar", "line", "scatter", "area"}
+PIE_AVERAGE_FALLBACK_REASON = (
+    "Pie/donut charts are intended for part-to-whole values. "
+    "A bar chart is used for comparing averages."
+)
 
 
 def extract_prompt_chart_type(prompt: str) -> str | None:
@@ -115,6 +119,30 @@ def _with_fallback_reason(plan: ChartPlan, reason: str) -> ChartPlan:
     return _replace_plan(plan, reason=f"{reason} Fallback: {plan.reason}")
 
 
+def _unsupported_renderer_reason(chart_type: str) -> str:
+    label = chart_type.strip().capitalize()
+    return f"{label} is not currently supported by the renderer. A bar chart is shown as a compatible fallback."
+
+
+def _bar_fallback_plan(
+    plan: ChartPlan,
+    reason: str,
+    dimension: str | None = None,
+    metric: str | None = None,
+    aggregation: str | None = None,
+) -> ChartPlan:
+    fallback = _replace_plan(
+        plan,
+        chart_type="bar",
+        dimension=dimension or plan.dimension,
+        metric=metric if metric is not None else plan.metric,
+        aggregation=aggregation or plan.aggregation,
+        sort="desc",
+        limit=min(plan.limit or 5, 8),
+    )
+    return _with_fallback_reason(fallback, reason)
+
+
 def _compatible_dimension(df: pd.DataFrame, dimension: str | None) -> bool:
     if not dimension or dimension not in df.columns:
         return False
@@ -129,10 +157,7 @@ def _apply_chart_type_override(df: pd.DataFrame, prompt: str, plan: ChartPlan) -
         return plan
 
     if requested not in SUPPORTED_OVERRIDE_TYPES:
-        return _with_fallback_reason(
-            plan,
-            f"Requested {requested} chart is not supported by the current renderer.",
-        )
+        return _bar_fallback_plan(plan, _unsupported_renderer_reason(requested))
 
     dimension = plan.dimension or _dimension_from_prompt(df, prompt)
     metric = plan.metric
@@ -140,26 +165,42 @@ def _apply_chart_type_override(df: pd.DataFrame, prompt: str, plan: ChartPlan) -
 
     if requested in {"pie", "donut"}:
         if not _compatible_dimension(df, dimension):
-            return _with_fallback_reason(
+            return _bar_fallback_plan(
                 plan,
                 f"Requested {requested} chart needs one categorical dimension.",
+                dimension=dimension,
+                metric=metric,
+                aggregation=aggregation,
             )
         if aggregation != "count" and not (metric and metric in df.columns and pd.api.types.is_numeric_dtype(df[metric])):
-            return _with_fallback_reason(
+            return _bar_fallback_plan(
                 plan,
                 f"Requested {requested} chart needs one numeric measure.",
+                dimension=dimension,
+                metric=metric,
+                aggregation=aggregation,
             )
         category_count = int(df[dimension].dropna().nunique()) if dimension else 0
-        if category_count > 20:
-            return _with_fallback_reason(
+        if category_count > 8:
+            return _bar_fallback_plan(
                 plan,
-                f"Requested {requested} chart has too many categories ({category_count}); use a bar chart instead.",
+                (
+                    "Pie/donut charts are intended for low-cardinality part-to-whole values. "
+                    f"A bar chart is used because {dimension} has {category_count} categories."
+                ),
+                dimension=dimension,
+                metric=metric,
+                aggregation=aggregation,
             )
-        note = (
-            f"User requested a {requested} chart; using top categories for readability."
-            if category_count > 8
-            else f"User requested a {requested} chart and the columns are compatible."
-        )
+        if aggregation not in {"sum", "count"}:
+            return _bar_fallback_plan(
+                plan,
+                PIE_AVERAGE_FALLBACK_REASON,
+                dimension=dimension,
+                metric=metric,
+                aggregation=aggregation,
+            )
+        note = f"User requested a {requested} chart and the columns are compatible."
         return _replace_plan(
             plan,
             chart_type=requested,

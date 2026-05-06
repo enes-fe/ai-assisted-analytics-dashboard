@@ -9,6 +9,7 @@ import pandas as pd
 from .column_cards import build_column_cards
 from .groq_client import call_groq_structured
 from .schemas import FastSemanticPlan
+from .semantic_validation import validate_fast_semantic_plan
 
 
 def _env_int(name: str, default: int) -> int:
@@ -19,10 +20,11 @@ def _env_int(name: str, default: int) -> int:
 
 
 FAST_SYSTEM_PROMPT = """\
-You are a semantic column selector for an analytics dashboard.
-Use ONLY existing column names exactly as provided — do not invent new columns.
-Do not calculate any values or metrics.
+You are a semantic and analysis-intent planner for an analytics dashboard.
+Use ONLY existing column names exactly as provided; do not invent new columns.
+Do not calculate any values, percentages, rankings, aggregations, or chartData.
 Prefer domain-important columns over random numeric columns.
+You may recommend what calculation should be performed, but Pandas backend code performs the calculation.
 
 Domain priorities:
 - football/soccer: Player/Team/Position + Goals/Assists/Rating/xG/Shots/Minutes
@@ -30,14 +32,25 @@ Domain priorities:
 - HR: Department/Employee + Attrition/Salary/Performance/Overtime/Tenure
 - logistics: Vendor/Route/Date + Delay/LeadTime/Stock/Quantity/Cost
 
+Populate backward-compatible fields and also provide:
+- metrics: semantic plans for important columns with role, semantic_type, aggregation, direction, include_as_kpi, include_in_clustering, confidence.
+- recommended_analyses: intended analyses such as kpi, bar, pie, scatter, line, clustering.
+
+Allowed values:
+- role: outcome_metric, driver_metric, supporting_metric, identifier, dimension
+- semantic_type: score, percentage, rate, duration, count, money, quantity, index, raw_numeric
+- aggregation: mean, sum, count, min, max
+- direction: higher_is_better, lower_is_better, context_dependent, neutral
+- metric confidence: low, medium, high
+
 Return ONLY valid JSON matching the FastSemanticPlan schema.\
 """
 
 
 async def generate_fast_semantic_plan(df: pd.DataFrame) -> FastSemanticPlan:
-    """Call Groq to identify semantic roles for dataset columns.
+    """Call Groq to identify semantic roles and intended analysis plans.
 
-    The LLM only selects column names — Pandas performs all calculations.
+    The LLM only plans semantics and calculation intent; Pandas performs all calculations.
     """
     max_cols = _env_int("AI_MAX_COLUMN_CARDS", 25)
     timeout = _env_int("AI_SEMANTIC_TIMEOUT_SECONDS", 8)
@@ -56,7 +69,9 @@ async def generate_fast_semantic_plan(df: pd.DataFrame) -> FastSemanticPlan:
                     "column_cards": cards,
                     "task": (
                         "Identify detected_domain, primary_entity, primary_metrics, "
-                        "secondary_metrics, dimensions, time_columns, ignored_columns, confidence. "
+                        "secondary_metrics, dimensions, time_columns, ignored_columns, confidence, "
+                        "metrics, and recommended_analyses. "
+                        "For each metric, recommend aggregation/direction but do not calculate values. "
                         "Use only names from available_columns."
                     ),
                 },
@@ -72,25 +87,9 @@ async def generate_fast_semantic_plan(df: pd.DataFrame) -> FastSemanticPlan:
         timeout_seconds=timeout,
     )
 
-    # Validate all column names against the actual DataFrame
-    plan = _validate_plan_columns(plan, df)
-    return plan
+    return validate_fast_semantic_plan(plan, df)
 
 
 def _validate_plan_columns(plan: FastSemanticPlan, df: pd.DataFrame) -> FastSemanticPlan:
-    """Remove any LLM-invented column names that don't exist in the DataFrame."""
-    valid = set(map(str, df.columns.tolist()))
-
-    def _filter(cols: list[str]) -> list[str]:
-        return [c for c in cols if c in valid]
-
-    return FastSemanticPlan(
-        detected_domain=plan.detected_domain,
-        primary_entity=plan.primary_entity if plan.primary_entity in valid else None,
-        primary_metrics=_filter(plan.primary_metrics),
-        secondary_metrics=_filter(plan.secondary_metrics),
-        dimensions=_filter(plan.dimensions),
-        time_columns=_filter(plan.time_columns),
-        ignored_columns=_filter(plan.ignored_columns),
-        confidence=plan.confidence,
-    )
+    """Backward-compatible wrapper for older direct imports."""
+    return validate_fast_semantic_plan(plan, df)

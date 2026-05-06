@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,42 @@ class FastSemanticPlan(BaseModel):
     time_columns: List[str] = Field(default_factory=list)
     ignored_columns: List[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    metrics: list["FastMetricPlan"] = Field(default_factory=list)
+    recommended_analyses: list["FastAnalysisPlan"] = Field(default_factory=list)
+    validation_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class FastMetricPlan(BaseModel):
+    column: str
+    role: str = "supporting_metric"
+    semantic_type: str = "raw_numeric"
+    aggregation: str = "mean"
+    direction: str = "neutral"
+    include_as_kpi: bool = False
+    include_in_clustering: bool = False
+    confidence: str = "medium"
+    validation_status: str = "accepted"
+    aggregation_source: str = "ai_validated"
+    repair_reason: Optional[str] = None
+
+
+class FastAnalysisPlan(BaseModel):
+    type: str
+    metric: Optional[str] = None
+    second_metric: Optional[str] = None
+    dimension: Optional[str] = None
+    aggregation: Optional[str] = None
+    features: list[str] = Field(default_factory=list)
+    priority: int = Field(default=3, ge=1, le=5)
+    reason: str = ""
+    validation_status: str = "accepted"
+    repair_reason: Optional[str] = None
+
+
+try:
+    FastSemanticPlan.model_rebuild()
+except AttributeError:
+    FastSemanticPlan.update_forward_refs()
 
 
 # ── Legacy verbose schema — kept for backward compat with /api/analytics/core ─

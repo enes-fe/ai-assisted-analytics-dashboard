@@ -623,7 +623,13 @@ async def get_clustering(dataset_id: int, req: ClusterRequest):
     if df is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    cluster_result = ml_service.run_clustering(df, selected_cols=req.selected_cols)
+    # Phase D: pass cached semantic plan for smarter feature selection
+    semantic_plan = _fast_plan_cache.get(dataset_id)
+    cluster_result = ml_service.run_clustering(
+        df,
+        selected_cols=req.selected_cols,
+        semantic_plan=semantic_plan,
+    )
 
     if isinstance(cluster_result, dict) and "error" in cluster_result:
         return JSONResponse(status_code=200, content={"charts": [], "error": cluster_result["error"]})

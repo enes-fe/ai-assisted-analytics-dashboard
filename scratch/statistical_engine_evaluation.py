@@ -224,7 +224,13 @@ def evaluate_statistical_engine():
     customer_cluster_ok = (
         isinstance(customer_cluster, dict)
         and customer_cluster.get("type") == "clustering"
-        and customer_cluster.get("title", "").startswith("M\u00fc\u015fteri Segmentasyonu")
+        and (
+            # Phase D: new English title format
+            "Customer" in (customer_cluster.get("title") or "")
+            or "Segment" in (customer_cluster.get("title") or "")
+            # Legacy Turkish title (kept for backward compat)
+            or (customer_cluster.get("title") or "").startswith("Müşteri Segmentasyonu")
+        )
         and len(customer_names) == len(set(customer_names))
         and "department" in category_columns
         and any(

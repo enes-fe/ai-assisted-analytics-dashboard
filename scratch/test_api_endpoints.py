@@ -7,7 +7,10 @@ from fastapi.testclient import TestClient
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend")))
 
+import main as main_module  # noqa: E402
 from main import app  # noqa: E402
+from services.ai.schemas import FastAnalysisPlan, FastMetricPlan, FastSemanticPlan  # noqa: E402
+from services.ai.semantic_validation import validate_fast_semantic_plan  # noqa: E402
 
 
 client = TestClient(app)
@@ -73,10 +76,67 @@ def test_api_cluster(dataset_id):
     print("OK /api/ml/cluster contract passed")
 
 
+def test_fast_dashboard_semantic_plan_contract(dataset_id):
+    print(f"Testing /api/ai/fast-dashboard/{dataset_id} semantic plan contract...")
+    original_generate = main_module.generate_fast_semantic_plan
+    main_module._fast_plan_cache.pop(dataset_id, None)
+
+    async def fake_generate_fast_semantic_plan(df):
+        raw_plan = FastSemanticPlan(
+            detected_domain="sales",
+            primary_metrics=["Sales"],
+            secondary_metrics=["Cost"],
+            dimensions=["Category"],
+            metrics=[
+                FastMetricPlan(
+                    column="Sales",
+                    role="outcome_metric",
+                    semantic_type="money",
+                    aggregation="sum",
+                    direction="higher_is_better",
+                    include_as_kpi=True,
+                ),
+                FastMetricPlan(
+                    column="Cost",
+                    role="supporting_metric",
+                    semantic_type="money",
+                    aggregation="sum",
+                    direction="higher_is_better",
+                    include_as_kpi=True,
+                ),
+            ],
+            recommended_analyses=[
+                FastAnalysisPlan(type="bar", metric="Sales", dimension="Category", aggregation="sum"),
+            ],
+        )
+        return validate_fast_semantic_plan(raw_plan, df)
+
+    try:
+        main_module.generate_fast_semantic_plan = fake_generate_fast_semantic_plan
+        response = client.get(f"/api/ai/fast-dashboard/{dataset_id}")
+    finally:
+        main_module.generate_fast_semantic_plan = original_generate
+        main_module._fast_plan_cache.pop(dataset_id, None)
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data.get("status") == "success", data
+    assert "kpis" in data
+    assert "charts" in data
+    semantic_plan = data.get("semantic_plan") or {}
+    for key in ["primary_metrics", "secondary_metrics", "dimensions", "time_columns", "ignored_columns"]:
+        assert key in semantic_plan
+    assert "metrics" in semantic_plan
+    assert "recommended_analyses" in semantic_plan
+    assert "validation_summary" in semantic_plan
+    print("OK /api/ai/fast-dashboard semantic plan contract passed")
+
+
 if __name__ == "__main__":
     try:
         ds_id = test_api_upload()
         test_core_analytics(ds_id)
+        test_fast_dashboard_semantic_plan_contract(ds_id)
         test_api_forecast(ds_id)
         test_api_cluster(ds_id)
         print("\nAll integration tests passed!")

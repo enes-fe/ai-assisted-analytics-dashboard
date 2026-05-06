@@ -15,6 +15,7 @@ from sklearn.preprocessing import StandardScaler
 
 from .utils import sanitize_for_json, select_label_column, is_id_column, format_col_name
 from .forecast_utils import getForecastDirection
+from .clustering_feature_selector import select_clustering_features, build_clustering_title
 
 try:
     from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -548,7 +549,7 @@ def run_forecasting(df: pd.DataFrame, periods: int = 6) -> list | dict:
     return results
 
 
-def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5) -> dict:
+def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5, semantic_plan=None) -> dict:
     num_cols_available = [
         c for c in df.select_dtypes(include=[np.number]).columns.tolist()
         if df[c].dropna().nunique() > 2 and not is_id_column(str(c), df[c])
@@ -557,14 +558,24 @@ def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5)
     if len(num_cols_available) < 2:
         return {"error": "Clustering için en az 2 numerik kolon gerekli."}
 
-    if not selected_cols:
-        scaled_candidates = df[num_cols_available].apply(pd.to_numeric, errors="coerce")
-        variances = scaled_candidates.var().sort_values(ascending=False)
-        selected_cols = variances.head(4).index.tolist()
-    else:
+    # ── Phase D: semantic-aware feature selection ──────────────────────────────
+    if selected_cols:
+        # Explicit user selection: validate against available numeric cols
         selected_cols = [c for c in selected_cols if c in num_cols_available]
         if len(selected_cols) < 2:
             return {"error": "Lütfen en az 2 geçerli numerik kolon seçin."}
+        feature_meta = {
+            "feature_source": "user_selected",
+            "selected_features": selected_cols,
+            "rejected_features": [],
+            "semantic_context": getattr(semantic_plan, "detected_domain", None),
+            "fallback_reason": None,
+        }
+    else:
+        feature_meta = select_clustering_features(df, semantic_plan=semantic_plan)
+        selected_cols = feature_meta["selected_features"]
+        if len(selected_cols) < 2:
+            return {"error": "Clustering için en az 2 geçerli numerik kolon seçilemedi."}
 
     df_clean = df[selected_cols].dropna()
     if len(df_clean) < 10:
@@ -613,11 +624,7 @@ def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5)
         silhouette_text = "Silhouette Score: Not available."
     else:
         silhouette_text = f"Silhouette Score: {silhouette:.3f} ({silhouette_quality})."
-    segmentation_note = (
-        "Exploratory segmentation; weak separation means labels should be treated as tentative."
-        if "low_silhouette" in cluster_warnings or "high_overlap" in cluster_warnings
-        else "Segmentation summary; validate clusters against domain context before using them operationally."
-    )
+
 
     cluster_profiles: list = []
     cluster_sizes = []
@@ -664,11 +671,27 @@ def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5)
     if label_col and label_col in df.columns:
         scatter_data["__label"] = df.loc[df_result.index, label_col].astype(str).values
 
+    # ── Phase D: build title from semantic context ─────────────────────────────
+    cluster_title = build_clustering_title(
+        df,
+        selected_cols,
+        feature_meta.get("semantic_context"),
+        optimal_k,
+    )
+
+    # Exploratory language when separation is weak
+    is_exploratory = "low_silhouette" in cluster_warnings or "high_overlap" in cluster_warnings
+    quality_note = (
+        "Exploratory segmentation — weak separation; treat labels as tentative."
+        if is_exploratory
+        else "Segmentation summary; validate against domain context before operational use."
+    )
+
     return sanitize_for_json({
         "id": "clustering-result",
         "type": "clustering",
         "detected_domain": domain,
-        "title": f"{detect_cluster_domain(df)} ({optimal_k} Küme)",
+        "title": cluster_title,
         "optimal_k": optimal_k,
         "selected_cols": selected_cols,
         "elbow_data": [{"k": k, "inertia": round(inertias[i], 2)} for i, k in enumerate(k_range)],
@@ -690,8 +713,17 @@ def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5)
         "labelName": label_col,
         "metricKeys": selected_cols,
         "insight": (
-            f"{segmentation_note} k={optimal_k}; {len(df_result)} records grouped across "
+            f"{quality_note} k={optimal_k}; {len(df_result)} records grouped across "
             f"{len(selected_cols)} features. {silhouette_text}"
         ),
         "chartData": scatter_data.fillna(0).to_dict(orient="records"),
+        # ── Phase D metadata ────────────────────────────────────────────────
+        "clustering_metadata": {
+            "feature_source": feature_meta.get("feature_source"),
+            "selected_features": feature_meta.get("selected_features"),
+            "rejected_features": feature_meta.get("rejected_features", []),
+            "semantic_context": feature_meta.get("semantic_context"),
+            "fallback_reason": feature_meta.get("fallback_reason"),
+            "is_exploratory": is_exploratory,
+        },
     })

@@ -12,6 +12,10 @@ from .schemas import ChartPlan, SemanticDatasetPlan
 
 AGG_FUNCS = {"sum", "mean", "count", "min", "max"}
 CHART_TYPES = {"bar", "line", "pie", "donut", "scatter", "area", "table"}
+PIE_AVERAGE_FALLBACK_REASON = (
+    "Pie/donut charts are intended for part-to-whole values. "
+    "A bar chart is used for comparing averages."
+)
 
 
 def _valid_col(df: pd.DataFrame, col: Optional[str]) -> bool:
@@ -77,6 +81,23 @@ def _chart_insight(chart_type: str, value_col: Optional[str], dimension: Optiona
     return "Seçilen alanlar tablo görünümünde listelendi."
 
 
+def _fallback_message_from_reason(reason: str) -> Optional[str]:
+    reason_lower = reason.lower()
+    if "not currently supported by the renderer" in reason_lower:
+        for chart_type in ["heatmap", "treemap"]:
+            if chart_type in reason_lower:
+                label = chart_type.capitalize()
+                return f"{label} is not currently supported by the renderer. A bar chart is shown as a compatible fallback."
+        return "The requested chart is not currently supported by the renderer. A bar chart is shown as a compatible fallback."
+    if "part-to-whole" in reason_lower and "comparing averages" in reason_lower:
+        return PIE_AVERAGE_FALLBACK_REASON
+    if "low-cardinality part-to-whole" in reason_lower:
+        return "Pie/donut charts are intended for low-cardinality part-to-whole values. A bar chart is used as a compatible fallback."
+    if "fallback" in reason_lower or "not supported" in reason_lower or "desteklen" in reason_lower:
+        return "The requested chart type is not currently supported by the renderer. A compatible fallback chart is shown."
+    return None
+
+
 def _records(data: pd.DataFrame) -> list[dict]:
     safe = data.copy()
     for col in safe.columns:
@@ -93,6 +114,26 @@ def build_chart_from_plan(df: pd.DataFrame, plan: ChartPlan) -> Optional[dict]:
     metric = plan.metric
     second_metric = plan.second_metric
     dimension = plan.dimension
+    eligibility_fallback_message: Optional[str] = None
+
+    if chart_type in {"pie", "donut"} and _valid_col(df, dimension):
+        if pd.api.types.is_numeric_dtype(df[dimension]):
+            chart_type = "bar"
+            eligibility_fallback_message = (
+                "Pie/donut charts are intended for categorical part-to-whole values. "
+                "A bar chart is shown as a compatible fallback."
+            )
+        else:
+            category_count = int(df[dimension].dropna().nunique())
+            if category_count > 8:
+                chart_type = "bar"
+                eligibility_fallback_message = (
+                    "Pie/donut charts are intended for low-cardinality part-to-whole values. "
+                    "A bar chart is used as a compatible fallback."
+                )
+            elif plan.aggregation not in {"sum", "count"}:
+                chart_type = "bar"
+                eligibility_fallback_message = PIE_AVERAGE_FALLBACK_REASON
 
     try:
         if chart_type == "scatter":
@@ -187,9 +228,9 @@ def build_chart_from_plan(df: pd.DataFrame, plan: ChartPlan) -> Optional[dict]:
         # Derive title from actual columns, not the LLM plan (avoids title/data mismatch bugs)
         auto_title = f"{format_col_name(value_col)} - {format_col_name(dimension)} Analizi"
         insight = _chart_insight(chart_type, value_col, dimension, second_metric)
-        reason = (plan.reason or "").lower()
-        if "fallback" in reason or "not supported" in reason or "desteklen" in reason:
-            insight = f"{insight} İstenen grafik türü desteklenmediği için uyumlu bir grafik kullanıldı."
+        fallback_message = eligibility_fallback_message or _fallback_message_from_reason(plan.reason or "")
+        if fallback_message:
+            insight = f"{insight} {fallback_message}"
         return {
             "id": _chart_id(plan),
             "type": chart_type,
