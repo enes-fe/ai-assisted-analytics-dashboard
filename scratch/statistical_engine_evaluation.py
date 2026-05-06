@@ -203,6 +203,49 @@ def evaluate_statistical_engine():
         "Elbow method can choose more than two clusters depending on variance.",
     ))
 
+    customer_df = pd.DataFrame({
+        "customer_id": [f"C{i:03d}" for i in range(120)],
+        "department": np.repeat(["Retail", "Enterprise", "Online"], 40),
+        "purchase_amount": np.concatenate([rng.normal(120, 10, 40), rng.normal(850, 60, 40), rng.normal(420, 35, 40)]),
+        "recency_days": np.concatenate([rng.normal(90, 8, 40), rng.normal(12, 3, 40), rng.normal(45, 6, 40)]),
+        "churn_rate": np.concatenate([rng.normal(0.35, 0.04, 40), rng.normal(0.05, 0.02, 40), rng.normal(0.16, 0.03, 40)]),
+    })
+    customer_cluster = run_clustering(
+        customer_df,
+        selected_cols=["purchase_amount", "recency_days", "churn_rate"],
+    )
+    customer_profiles = customer_cluster.get("cluster_profiles", []) if isinstance(customer_cluster, dict) else []
+    customer_names = [profile.get("cluster_name") for profile in customer_profiles]
+    category_columns = {
+        category.get("column")
+        for profile in customer_profiles
+        for category in profile.get("top_categories", [])
+    }
+    customer_cluster_ok = (
+        isinstance(customer_cluster, dict)
+        and customer_cluster.get("type") == "clustering"
+        and customer_cluster.get("title", "").startswith("M\u00fc\u015fteri Segmentasyonu")
+        and len(customer_names) == len(set(customer_names))
+        and "department" in category_columns
+        and any(
+            item.get("column") == "churn_rate" and item.get("lower_is_better")
+            for profile in customer_profiles
+            for item in profile.get("feature_rankings", [])
+        )
+    )
+    results.append(_scenario_result(
+        "Clustering domain naming contract",
+        "Customer clustering should share domain detection with naming, keep names unique, and surface common categories.",
+        {
+            "title": customer_cluster.get("title") if isinstance(customer_cluster, dict) else None,
+            "cluster_names": customer_names,
+            "category_columns": sorted(category_columns),
+        },
+        customer_cluster_ok,
+        "medium",
+        "Domain labels remain deterministic; LLM fallback is intentionally not part of this contract.",
+    ))
+
     return {
         "summary": {
             "passed": sum(1 for item in results if item["passed"]),

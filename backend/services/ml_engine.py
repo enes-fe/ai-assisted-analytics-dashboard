@@ -24,7 +24,7 @@ except ImportError:
     print("[ML] statsmodels not installed; forecasting will use LinearRegression fallback only.")
 
 
-def detect_cluster_domain(df: pd.DataFrame) -> str:
+def _legacy_detect_cluster_domain(df: pd.DataFrame) -> str:
     cols_lower = " ".join(df.columns.str.lower())
     if any(k in cols_lower for k in ["customer", "client", "cust", "musteri"]):
         return "Müşteri Segmentasyonu"
@@ -48,6 +48,24 @@ LOWER_IS_BETTER_PATTERNS = [
     "defect",
     "risk",
     "cost",
+    "mortality",
+    "readmission",
+    "complication",
+    "churn",
+    "dropout",
+    "default",
+    "defaultrate",
+    "npl",
+    "fraud",
+    "debt",
+    "downtime",
+    "rejectrate",
+    "reject",
+    "waste",
+    "loss",
+    "failure",
+    "complaint",
+    "recency",
 ]
 
 CATEGORY_CANDIDATE_PATTERNS = [
@@ -63,6 +81,29 @@ CATEGORY_CANDIDATE_PATTERNS = [
     "team",
     "position",
     "playerposition",
+    "department",
+    "segment",
+    "diagnosis",
+    "industry",
+    "country",
+    "channel",
+    "branch",
+    "status",
+    "plan",
+    "tier",
+    "customersegment",
+    "employeelevel",
+    "jobrole",
+    "clinic",
+    "hospital",
+    "treatment",
+    "carrier",
+    "warehouse",
+    "supplier",
+    "device",
+    "machine",
+    "line",
+    "shift",
 ]
 
 
@@ -70,13 +111,49 @@ def _norm_name(value: str) -> str:
     return "".join(ch for ch in str(value).lower() if ch.isalnum())
 
 
-def _metric_domain(selected_cols: list[str], df: pd.DataFrame) -> str:
-    cols_lower = " ".join(str(col).lower() for col in list(df.columns) + selected_cols)
-    if any(token in cols_lower for token in ["player", "team", "goal", "assist", "minute", "score", "pass", "position"]):
-        return "sports"
-    if any(token in cols_lower for token in ["profit", "revenue", "sales", "price", "retail", "product", "volume", "quantity"]):
-        return "commerce"
+CLUSTER_DOMAIN_TITLES = {
+    "customer": "M\u00fc\u015fteri Segmentasyonu",
+    "employee": "\u00c7al\u0131\u015fan K\u00fcmeleri",
+    "commerce": "\u00dcr\u00fcn K\u00fcmeleri",
+    "sports": "Oyuncu Performans K\u00fcmeleri",
+    "health": "Sa\u011fl\u0131k Segmentasyonu",
+    "finance": "Finansal Risk Segmentasyonu",
+    "iot": "Sens\u00f6r K\u00fcmeleri",
+    "manufacturing": "\u00dcretim K\u00fcmeleri",
+    "logistics": "Sipari\u015f K\u00fcmeleri",
+    "general": "Veri Segmentasyonu",
+}
+
+
+def _detect_cluster_domain_key(df: pd.DataFrame, selected_cols: list[str] | None = None) -> str:
+    columns = list(df.columns)
+    if selected_cols:
+        columns.extend(selected_cols)
+    cols_lower = " ".join(str(col).lower() for col in columns)
+
+    domain_tokens = [
+        ("sports", ["player", "athlete", "oyuncu", "goal", "assist", "gol", "minute", "pass", "position"]),
+        ("customer", ["customer", "client", "cust", "musteri", "segment", "churn", "recency", "loyalty"]),
+        ("employee", ["employee", "staff", "worker", "calisan", "personel", "hire", "tenure", "department", "salary"]),
+        ("health", ["patient", "diagnosis", "treatment", "hospital", "clinic", "bmi", "glucose", "mortality", "readmission"]),
+        ("finance", ["credit", "loan", "debt", "default", "fraud", "npl", "income", "balance", "risk_score"]),
+        ("manufacturing", ["machine", "downtime", "defect", "reject", "waste", "yield", "production", "quality"]),
+        ("iot", ["sensor", "temperature", "humidity", "vibration", "pressure", "voltage", "device"]),
+        ("logistics", ["order", "ship", "deliver", "delivery", "siparis", "kargo", "warehouse", "carrier"]),
+        ("commerce", ["product", "item", "sku", "urun", "inventory", "profit", "revenue", "sales", "price", "retail", "quantity"]),
+    ]
+    for domain, tokens in domain_tokens:
+        if any(token in cols_lower for token in tokens):
+            return domain
     return "general"
+
+
+def detect_cluster_domain(df: pd.DataFrame) -> str:
+    return CLUSTER_DOMAIN_TITLES.get(_detect_cluster_domain_key(df), CLUSTER_DOMAIN_TITLES["general"])
+
+
+def _metric_domain(selected_cols: list[str], df: pd.DataFrame) -> str:
+    return _detect_cluster_domain_key(df, selected_cols)
 
 
 def _is_lower_better_metric(col: str) -> bool:
@@ -135,31 +212,84 @@ def _feature_phrase(feature: dict, domain: str) -> str:
     label = feature["label"]
     name = _norm_name(feature["column"])
     level = feature["level"]
+    high = level == "high"
 
     if level == "balanced":
         if domain == "sports" and any(token in name for token in ["goal", "assist", "score", "rating", "xg", "xa"]):
             return "Balanced Contribution"
+        if domain == "customer" and any(token in name for token in ["purchase", "spend", "revenue", "value"]):
+            return "Balanced Customer Value"
+        if domain == "employee" and any(token in name for token in ["salary", "tenure", "performance"]):
+            return "Balanced Workforce Profile"
+        if domain == "health" and any(token in name for token in ["risk", "mortality", "readmission", "complication"]):
+            return "Balanced Clinical Risk"
+        if domain == "finance" and any(token in name for token in ["risk", "default", "debt", "fraud"]):
+            return "Balanced Financial Risk"
         return f"Balanced {label}"
 
     if domain == "sports":
         if any(token in name for token in ["minute", "mins", "playingtime"]):
-            return "High Minutes" if level == "high" else "Limited Minutes"
+            return "High Minutes" if high else "Limited Minutes"
         if "pass" in name:
-            return "High Passing Volume" if level == "high" else "Low Passing Volume"
+            return "High Passing Volume" if high else "Low Passing Volume"
         if any(token in name for token in ["minutesperscore", "minutespergoal", "scoringfrequency"]):
-            return "Low Scoring Efficiency" if level == "high" else "High Scoring Efficiency"
+            return "Low Scoring Efficiency" if high else "High Scoring Efficiency"
         if any(token in name for token in ["goal", "assist", "score", "rating", "xg", "xa"]):
-            return "High Contribution" if level == "high" else "Low Contribution"
+            return "High Contribution" if high else "Low Contribution"
 
     if domain == "commerce":
         if any(token in name for token in ["profit", "margin"]):
-            return "Profitable" if level == "high" else "Low Profit"
+            return "Profitable" if high else "Low Profit"
         if any(token in name for token in ["sales", "revenue", "volume", "quantity", "orders"]):
-            return "High Volume" if level == "high" else "Low Volume"
+            return "High Volume" if high else "Low Volume"
         if "price" in name:
-            return "Premium" if level == "high" else "Low Price"
+            return "Premium" if high else "Low Price"
         if "cost" in name:
-            return "High Cost" if level == "high" else "Low Cost"
+            return "High Cost" if high else "Low Cost"
+
+    if domain == "customer":
+        if any(token in name for token in ["purchase", "spend", "revenue", "sales", "value", "amount"]):
+            return "High Customer Value" if high else "Low Customer Value"
+        if any(token in name for token in ["recency", "churn", "complaint", "risk"]):
+            return "Elevated Retention Risk" if high else "Lower Retention Risk"
+        if any(token in name for token in ["frequency", "orders", "visits"]):
+            return "Frequent Buyers" if high else "Infrequent Buyers"
+
+    if domain == "employee":
+        if "salary" in name or "compensation" in name:
+            return "Higher Compensation" if high else "Lower Compensation"
+        if "tenure" in name or "experience" in name:
+            return "Long Tenure" if high else "Newer Employees"
+        if any(token in name for token in ["performance", "rating", "score"]):
+            return "High Performance" if high else "Lower Performance"
+
+    if domain == "health":
+        if any(token in name for token in ["mortality", "readmission", "complication", "risk"]):
+            return "Elevated Clinical Risk" if high else "Lower Clinical Risk"
+        if any(token in name for token in ["bmi", "glucose", "cholesterol", "pressure"]):
+            return f"High {label}" if high else f"Low {label}"
+
+    if domain == "finance":
+        if any(token in name for token in ["default", "npl", "fraud", "risk", "debt"]):
+            return "Elevated Financial Risk" if high else "Lower Financial Risk"
+        if any(token in name for token in ["income", "balance", "limit", "score"]):
+            return f"High {label}" if high else f"Low {label}"
+
+    if domain == "manufacturing":
+        if any(token in name for token in ["defect", "reject", "waste", "downtime", "failure"]):
+            return "High Production Loss" if high else "Low Production Loss"
+        if any(token in name for token in ["yield", "throughput", "output"]):
+            return "High Throughput" if high else "Low Throughput"
+
+    if domain == "iot":
+        if any(token in name for token in ["temperature", "pressure", "vibration", "humidity", "voltage"]):
+            return f"High {label}" if high else f"Low {label}"
+
+    if domain == "logistics":
+        if any(token in name for token in ["delivery", "delay", "ship", "transit"]):
+            return "Slower Fulfillment" if high else "Faster Fulfillment"
+        if any(token in name for token in ["order", "value", "volume", "quantity"]):
+            return "High Order Volume" if high else "Low Order Volume"
 
     return f"High {label}" if level == "high" else f"Low {label}"
 
@@ -178,7 +308,7 @@ def _cluster_name(cluster_id: int, feature_rankings: list[dict], domain: str) ->
         if "High Minutes" in phrases and "High Passing Volume" in phrases:
             return "High Minutes / High Passing Volume"
         if not top:
-            return "Main Rotation / Balanced Contribution"
+            return f"Main Rotation / Balanced Contribution {cluster_id + 1}"
 
     if domain == "commerce":
         phrases = [_feature_phrase(item, domain) for item in feature_rankings[:4]]
@@ -199,6 +329,14 @@ def _cluster_name(cluster_id: int, feature_rankings: list[dict], domain: str) ->
         if phrase not in phrases:
             phrases.append(phrase)
     return " / ".join(phrases[:2]) + " Segment"
+
+
+def _dedupe_cluster_name(name: str, used_names: dict[str, int]) -> str:
+    count = used_names.get(name, 0) + 1
+    used_names[name] = count
+    if count == 1:
+        return name
+    return f"{name} ({count})"
 
 
 def _categorical_candidates(df: pd.DataFrame, selected_cols: list[str]) -> list[str]:
@@ -484,11 +622,13 @@ def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5)
     cluster_profiles: list = []
     cluster_sizes = []
     cluster_names: dict[int, str] = {}
+    used_names: dict[str, int] = {}
     for cluster_id in range(optimal_k):
         cluster_df = df_result[df_result["cluster"] == cluster_id]
         cluster_sizes.append(len(cluster_df))
-        feature_rankings = _feature_rankings(cluster_df, df_result, selected_cols)
-        cluster_names[cluster_id] = _cluster_name(cluster_id, feature_rankings, domain)
+        feature_rankings = _feature_rankings(cluster_df, df, selected_cols)
+        name = _cluster_name(cluster_id, feature_rankings, domain)
+        cluster_names[cluster_id] = _dedupe_cluster_name(name, used_names)
         profile: dict = {
             "cluster_id": cluster_id,
             "cluster_name": cluster_names[cluster_id],
