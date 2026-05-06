@@ -28,6 +28,7 @@ from services.ai.schemas import SemanticDatasetPlan, FastSemanticPlan, model_dum
 from services.ai.fast_semantic_planner import generate_fast_semantic_plan
 from services.ai.fast_chart_builder import build_charts_from_fast_plan
 from services.ai.fast_kpi_builder import build_kpis_from_fast_plan
+from services.ai.cluster_namer import apply_groq_cluster_names
 
 
 class ClusterRequest(BaseModel):
@@ -626,6 +627,8 @@ async def get_clustering(dataset_id: int, req: ClusterRequest):
 
     if isinstance(cluster_result, dict) and "error" in cluster_result:
         return JSONResponse(status_code=200, content={"charts": [], "error": cluster_result["error"]})
+
+    cluster_result = await apply_groq_cluster_names(cluster_result)
 
     return {"charts": [cluster_result]}
 

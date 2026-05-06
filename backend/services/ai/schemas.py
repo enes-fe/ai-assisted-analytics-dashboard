@@ -82,6 +82,16 @@ class PromptChartIntent(ChartPlan):
     understood_request: str
 
 
+class ClusterNameSuggestion(BaseModel):
+    cluster_id: int
+    name: str
+    reason: str = ""
+
+
+class ClusterNameSuggestions(BaseModel):
+    suggestions: list[ClusterNameSuggestion] = Field(default_factory=list)
+
+
 # ── Utility helpers ──────────────────────────────────────────────────────────
 
 def model_dump_compat(model: BaseModel) -> dict:

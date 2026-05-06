@@ -27,6 +27,8 @@ GROQ_API_KEY=your_api_key_here
 GROQ_MODEL=llama-3.1-8b-instant
 AI_SEMANTIC_TIMEOUT_SECONDS=8
 AI_CHAT_TIMEOUT_SECONDS=8
+AI_CLUSTER_NAMING_ENABLED=true
+AI_CLUSTER_NAMING_TIMEOUT_SECONDS=4
 AI_MAX_COLUMN_CARDS=25
 AI_MAX_RECOMMENDED_CHARTS=5
 ```
@@ -53,6 +55,8 @@ uvicorn main:app --reload --port 8000
 | `GROQ_MODEL` | `llama-3.1-8b-instant` | Groq model to use |
 | `AI_SEMANTIC_TIMEOUT_SECONDS` | `8` | Timeout for semantic planning |
 | `AI_CHAT_TIMEOUT_SECONDS` | `8` | Timeout for chat/prompt charts |
+| `AI_CLUSTER_NAMING_ENABLED` | `true` | Enables optional Groq fallback for generic cluster names |
+| `AI_CLUSTER_NAMING_TIMEOUT_SECONDS` | `4` | Timeout for optional cluster naming fallback |
 | `AI_MAX_COLUMN_CARDS` | `25` | Max columns sent to Groq |
 | `AI_MAX_RECOMMENDED_CHARTS` | `5` | Max charts to generate |
 

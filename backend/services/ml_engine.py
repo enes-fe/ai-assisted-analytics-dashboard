@@ -667,6 +667,7 @@ def run_clustering(df: pd.DataFrame, selected_cols: list = None, max_k: int = 5)
     return sanitize_for_json({
         "id": "clustering-result",
         "type": "clustering",
+        "detected_domain": domain,
         "title": f"{detect_cluster_domain(df)} ({optimal_k} Küme)",
         "optimal_k": optimal_k,
         "selected_cols": selected_cols,
