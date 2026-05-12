@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 
-# ── Compact fast semantic plan (replaces verbose SemanticDatasetPlan) ────────
+# Compact fast semantic plan used by the fast dashboard path.
 
 class FastSemanticPlan(BaseModel):
     detected_domain: str
@@ -54,9 +54,7 @@ except AttributeError:
     FastSemanticPlan.update_forward_refs()
 
 
-# ── Legacy verbose schema — kept for backward compat with /api/analytics/core ─
-
-from typing import Literal
+# Legacy verbose schema kept for backward compatibility with /api/analytics/core.
 
 ColumnRole = Literal[
     "primary_entity",
@@ -128,7 +126,7 @@ class ClusterNameSuggestions(BaseModel):
     suggestions: list[ClusterNameSuggestion] = Field(default_factory=list)
 
 
-# ── Utility helpers ──────────────────────────────────────────────────────────
+# Compatibility helpers for Pydantic v1/v2.
 
 def model_dump_compat(model: BaseModel) -> dict:
     if hasattr(model, "model_dump"):
