@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import time
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -62,24 +64,28 @@ async def call_groq_structured(
 ) -> BaseModel:
     """Call Groq with JSON mode and validate the response against schema_model.
 
-    On invalid JSON / validation failure, makes one repair attempt.
+    Uses a shared deadline for both the first attempt and the optional repair attempt,
+    so total time never exceeds timeout_seconds regardless of how many attempts are made.
     Never returns unvalidated LLM output.
     """
     client = _get_groq_client()
     model = _get_model()
+    # Reserve a small portion of the budget for the repair attempt (at most 40%)
+    first_attempt_timeout = max(3, int(timeout_seconds * 0.7))
+    deadline = time.monotonic() + timeout_seconds
 
-    async def _chat(msgs: list[dict]) -> str:
+    async def _chat(msgs: list[dict], call_timeout: int) -> str:
         response = await client.chat.completions.create(
             model=model,
             messages=msgs,  # type: ignore[arg-type]
             temperature=temperature,
             response_format={"type": "json_object"},
-            timeout=timeout_seconds,
+            timeout=call_timeout,
         )
         return response.choices[0].message.content or ""
 
-    # ── First attempt ────────────────────────────────────────────────────────
-    raw_content = await _chat(messages)
+    # ── First attempt (uses 70% of budget) ───────────────────────────────────
+    raw_content = await _chat(messages, first_attempt_timeout)
 
     try:
         data = _loads_json(raw_content)
@@ -87,28 +93,39 @@ async def call_groq_structured(
         # Debug metadata (never exposes key)
         _log_debug(model, timeout_seconds, attempt=1)
         return result
-    except (json.JSONDecodeError, ValidationError, Exception) as first_error:
+    except (json.JSONDecodeError, ValidationError, Exception):
         pass  # Fall through to repair attempt
 
-    # ── Repair attempt ───────────────────────────────────────────────────────
-    schema_hint = (
-        schema_model.model_json_schema()
-        if hasattr(schema_model, "model_json_schema")
-        else schema_model.schema()
+    # ── Repair attempt (uses remaining budget) ────────────────────────────────
+    remaining = deadline - time.monotonic()
+    if remaining < 1.0:
+        # No time left for a repair attempt
+        raise asyncio.TimeoutError(
+            f"Groq structured output: first attempt produced invalid JSON and no time "
+            f"remains for a repair attempt (budget={timeout_seconds}s)."
+        )
+
+    repair_timeout = max(1, int(remaining))
+    # For small models, a concrete example works better than an abstract schema.
+    # List required top-level fields so the model knows what to fill.
+    required_fields = list(
+        getattr(schema_model, "model_fields", None) or getattr(schema_model, "__fields__", {}) or {}
     )
+    fields_hint = ", ".join(f'"{f}": <value>' for f in required_fields[:12])
     repair_messages = messages + [
         {"role": "assistant", "content": raw_content},
         {
             "role": "user",
             "content": (
-                "Your previous response was not valid JSON matching the required schema. "
-                "Return ONLY valid JSON that exactly matches this schema — no markdown, no explanation:\n"
-                f"{json.dumps(schema_hint, ensure_ascii=False)}"
+                "Your previous response did not match the required JSON format. "
+                "Return ONLY a plain JSON object with these top-level keys filled in with real values "
+                "(do NOT copy the schema, do NOT add markdown, do NOT add explanation):\n"
+                f"{{{fields_hint}}}"
             ),
         },
     ]
 
-    raw_repaired = await _chat(repair_messages)
+    raw_repaired = await _chat(repair_messages, repair_timeout)
 
     try:
         data = _loads_json(raw_repaired)

@@ -14,7 +14,7 @@ import time
 from collections import OrderedDict
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
 
 from database import engine, get_db, Base
@@ -62,6 +62,22 @@ def _env_int(name: str, default: int) -> int:
         return int(os.getenv(name, str(default)))
     except (ValueError, TypeError):
         return default
+
+
+def _safe_ai_error_message(error: Exception) -> str:
+    text = str(error).lower()
+    if "rate_limit" in text or "rate limit" in text or "tokens per day" in text or "tokens per minute" in text:
+        return (
+            "Groq token kotasi gecici olarak doldu. "
+            "Veri onizlemesi ve ML/forecast sonuclari kullanilabilir; kisa sure sonra tekrar deneyin."
+        )
+    if "request too large" in text:
+        return "AI istegi model limitini asti. Veri onizlemesi kullanilabilir; daha kucuk bir istekle tekrar deneyin."
+    if "api key" in text or "unauthorized" in text:
+        return "Groq API anahtari dogru yapilandirilmamis."
+    if "timeout" in text or "timed out" in text:
+        return "AI semantik analiz zaman asimina ugradi."
+    return "AI semantik dashboard olusturulamadi."
 
 
 def _bounded_chart_count(value: int) -> int:
@@ -261,7 +277,7 @@ async def get_fast_dashboard(dataset_id: int):
     if df is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    timeout_seconds = _env_int("AI_SEMANTIC_TIMEOUT_SECONDS", 8)
+    timeout_seconds = _env_int("AI_SEMANTIC_TIMEOUT_SECONDS", 20)
     max_charts = _bounded_chart_count(_env_int("AI_MAX_RECOMMENDED_CHARTS", 5))
     groq_model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
@@ -328,7 +344,7 @@ async def get_fast_dashboard(dataset_id: int):
         )
 
     except Exception as e:
-        safe_error = str(e)
+        safe_error = _safe_ai_error_message(e)
         # Never expose API key in error messages
         api_key = os.getenv("GROQ_API_KEY", "")
         if api_key and api_key != "your_api_key_here":
@@ -416,7 +432,7 @@ async def process_chat(dataset_id: int = Form(...), prompt: str = Form(...)):
         raise HTTPException(status_code=404, detail="Dataset not found")
 
     if _env_enabled("AI_CHAT_ENABLED", "true"):
-        timeout_seconds = _env_int("AI_CHAT_TIMEOUT_SECONDS", 8)
+        timeout_seconds = _env_int("AI_CHAT_TIMEOUT_SECONDS", 15)
 
         # Reuse cached fast plan if available
         fast_plan = _fast_plan_cache.get(dataset_id)
@@ -453,8 +469,7 @@ async def process_chat(dataset_id: int = Form(...), prompt: str = Form(...)):
             return {
                 "charts": [],
                 "mode": "ai_prompt_error",
-                "message": "Bu komut için güvenilir bir grafik üretilemedi. Lütfen metriği ve kırılımı daha net yazın.",
-                "ai_error": str(ai_error),
+                "message": _safe_ai_error_message(ai_error),
             }
 
     return {
@@ -531,7 +546,7 @@ async def get_semantic_plan(dataset_id: int):
         return {"semantic_plan": {"error": "AI_SEMANTIC_ENABLED is disabled."}}
 
     try:
-        timeout_seconds = _env_int("AI_SEMANTIC_TIMEOUT_SECONDS", 8)
+        timeout_seconds = _env_int("AI_SEMANTIC_TIMEOUT_SECONDS", 20)
         plan = await asyncio.wait_for(
             generate_fast_semantic_plan(df),
             timeout=timeout_seconds,

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, List, Literal, Optional
+from typing import Any, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, validator
 
 
 # Compact fast semantic plan used by the fast dashboard path.
@@ -15,10 +15,51 @@ class FastSemanticPlan(BaseModel):
     dimensions: List[str] = Field(default_factory=list)
     time_columns: List[str] = Field(default_factory=list)
     ignored_columns: List[str] = Field(default_factory=list)
-    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    confidence: Union[float, str] = Field(default=0.5)
     metrics: list["FastMetricPlan"] = Field(default_factory=list)
     recommended_analyses: list["FastAnalysisPlan"] = Field(default_factory=list)
     validation_summary: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def coerce_confidence(cls, v: Any) -> float:
+        """Accept float (0-1) or string labels like 'low'/'medium'/'high'."""
+        if isinstance(v, (int, float)):
+            return max(0.0, min(1.0, float(v)))
+        _map = {"low": 0.25, "medium": 0.5, "high": 0.9}
+        return _map.get(str(v).strip().lower(), 0.5)
+
+    @field_validator("recommended_analyses", mode="before")
+    @classmethod
+    def coerce_analyses(cls, v: Any) -> list:
+        """Accept list of strings (e.g. ['kpi', 'bar']) or dicts or objects."""
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, str):
+                # Simple string like "kpi" or "bar" → minimal dict
+                result.append({"type": item.strip().lower()})
+            elif isinstance(item, dict):
+                result.append(item)
+            else:
+                result.append(item)
+        return result
+
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def coerce_metrics(cls, v: Any) -> list:
+        """Handle metrics that are dicts or objects; skip invalid items."""
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, dict) and "column" in item:
+                result.append(item)
+            elif hasattr(item, "column"):
+                result.append(item)
+            # Skip strings or malformed items
+        return result
 
 
 class FastMetricPlan(BaseModel):
@@ -33,6 +74,34 @@ class FastMetricPlan(BaseModel):
     validation_status: str = "accepted"
     aggregation_source: str = "ai_validated"
     repair_reason: Optional[str] = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def coerce_role(cls, v: Any) -> str:
+        allowed = {"outcome_metric", "driver_metric", "supporting_metric", "identifier", "dimension"}
+        s = str(v).strip().lower()
+        return s if s in allowed else "supporting_metric"
+
+    @field_validator("aggregation", mode="before")
+    @classmethod
+    def coerce_aggregation(cls, v: Any) -> str:
+        allowed = {"mean", "sum", "count", "min", "max"}
+        s = str(v).strip().lower()
+        return s if s in allowed else "mean"
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def coerce_direction(cls, v: Any) -> str:
+        allowed = {"higher_is_better", "lower_is_better", "context_dependent", "neutral"}
+        s = str(v).strip().lower().replace(" ", "_")
+        return s if s in allowed else "neutral"
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def coerce_metric_confidence(cls, v: Any) -> str:
+        allowed = {"low", "medium", "high"}
+        s = str(v).strip().lower()
+        return s if s in allowed else "medium"
 
 
 class FastAnalysisPlan(BaseModel):
