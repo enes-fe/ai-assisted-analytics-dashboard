@@ -16,6 +16,9 @@ __pycache__/
 
 # Local config
 .env
+.env.*
+!.env.example
+!backend/.env.example
 *.local
 
 # Editor directories and files
@@ -34,9 +37,20 @@ data_storage/
 .dataset_storage/
 backend/.dataset_storage/
 *.db
+*.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 *.parquet
 *.pkl
+
+# Test and coverage outputs
+.coverage
+coverage/
+htmlcov/
 
 # Temporary TypeScript / tooling outputs
 tsc_errors*.txt
