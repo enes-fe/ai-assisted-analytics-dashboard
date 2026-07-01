@@ -13,7 +13,6 @@ The core product idea is deliberately narrow: AI can help identify semantic colu
 - Run forecast and clustering flows when the dataset is eligible.
 - Export dashboard reports as PDF.
 - Switch between English and Turkish UI text.
-- Keep advanced statistical tests behind opt-in/debug paths.
 
 ## Tech Stack
 
@@ -36,6 +35,20 @@ sample.csv                   Small demo dataset
 AI_SETUP.md                  AI provider setup notes
 STATISTICAL_LOGIC.md         Statistical scope and limitations
 ```
+
+## Screenshots
+
+### Dashboard Overview
+
+![Dashboard overview](docs/screenshots/dashboard-overview.png)
+
+### Chart Insights
+
+![Chart insights](docs/screenshots/chart-insights.png)
+
+### Forecasting
+
+![Forecasting](docs/screenshots/forecasting.png)
 
 ## Quick Start
 
@@ -92,28 +105,6 @@ AI_CHAT_TIMEOUT_SECONDS=8
 ```
 
 See [AI_SETUP.md](AI_SETUP.md) for the full environment-variable list and validation notes.
-
-## Validation
-
-Useful checks before publishing or demoing:
-
-```powershell
-npm run lint
-npm run build
-python -m compileall backend/services backend/main.py
-python scratch/test_backend_functions.py
-python scratch/test_api_endpoints.py
-python scratch/statistical_engine_evaluation.py
-```
-
-Some smoke scripts expect the local Python environment and backend dependencies to be installed.
-
-## Release Hygiene
-
-- Local secrets stay in `backend/.env`, which is ignored.
-- Local datasets, databases, logs, virtual environments, `node_modules/`, and `dist/` are ignored.
-- `backend/.env.example` is safe to commit and should be copied for local setup.
-- `sample.csv` is a small synthetic demo dataset.
 
 ## Scope Notes
 
